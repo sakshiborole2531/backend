@@ -1,2 +1,3 @@
 com\unichem\inventory\web\BusinessUnitControllerTest.class
+com\unichem\inventory\web\AutomaticImportTest.class
 com\unichem\inventory\web\MasterSidebarTest.class

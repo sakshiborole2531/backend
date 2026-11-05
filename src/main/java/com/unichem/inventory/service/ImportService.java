@@ -78,7 +78,18 @@ public class ImportService {
     // ------------------------------------------------------------------ reading
     public List<Map<String, String>> read(MultipartFile file) throws Exception {
         String n = Objects.requireNonNullElse(file.getOriginalFilename(), "").toLowerCase();
-        List<List<String>> aoa = n.endsWith(".xlsx") || n.endsWith(".xls") || n.endsWith(".xlsm") ? readExcel(file.getInputStream()) : readCsv(file.getInputStream());
+        return readStream(file.getInputStream(), n);
+    }
+
+    public List<Map<String, String>> readBytes(byte[] bytes, String fileName) throws Exception {
+        String n = Objects.requireNonNullElse(fileName, "").toLowerCase();
+        try (InputStream in = new java.io.ByteArrayInputStream(bytes)) {
+            return readStream(in, n);
+        }
+    }
+
+    private List<Map<String, String>> readStream(InputStream in, String lowerName) throws Exception {
+        List<List<String>> aoa = lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls") || lowerName.endsWith(".xlsm") ? readExcel(in) : readCsv(in);
         int h = 0;
         for (int i = 0; i < Math.min(10, aoa.size()); i++) if (aoa.get(i).stream().filter(v -> !v.isBlank()).count() >= 2) { h = i; break; }
         if (aoa.isEmpty()) return List.of();
@@ -141,6 +152,10 @@ public class ImportService {
     record Built(InventoryItem rec, List<String> errs, List<String> warns, int src, boolean excluded) {}
 
     private List<Built> map(List<Map<String, String>> rows, boolean sap, List<String> missing) {
+        return map(rows, sap, missing, current.allowedPlants(), false);
+    }
+
+    private List<Built> map(List<Map<String, String>> rows, boolean sap, List<String> missing, Set<String> allowedScope, boolean strictMasterPlant) {
         Map<String, List<String>> M = sap ? SAPSTOCK : APP;
         Set<String> keys = new LinkedHashSet<>(); rows.forEach(r -> keys.addAll(r.keySet()));
         Map<String, String> hidx = new HashMap<>(); keys.forEach(k -> hidx.put(Parsing.norm(k), k));
@@ -157,18 +172,22 @@ public class ImportService {
             col.forEach((f, k) -> raw.put(f, r.getOrDefault(k, "")));
             Map<String, Double> sums = new HashMap<>();
             sum.forEach((f, ks) -> sums.put(f, ks.stream().mapToDouble(k -> Parsing.num(r.get(k))).sum()));
-            out.add(build(raw, sums, ctx, i));
+            out.add(build(raw, sums, ctx, i, allowedScope, strictMasterPlant));
         }
         return out;
     }
 
     /** Port of buildRec: validation, master mapping, exclusion of non-inventory SAP types. */
-    private Built build(Map<String, String> raw, Map<String, Double> sums, MasterLookup.Ctx ctx, int src) {
+    private Built build(Map<String, String> raw, Map<String, Double> sums, MasterLookup.Ctx ctx, int src, Set<String> allowedScope, boolean strictMasterPlant) {
         List<String> errs = new ArrayList<>(), warns = new ArrayList<>();
         java.util.function.Function<String, String> s = k -> Objects.requireNonNullElse(raw.get(k), "").trim();
         String pv = s.apply("plant");
         Optional<Plant> pm = ctx.plant(pv);
-        if (pv.isEmpty()) errs.add("Plant missing"); else if (pm.isEmpty()) warns.add("Plant \"" + pv + "\" not in plant master");
+        if (pv.isEmpty()) errs.add("Plant missing");
+        else if (pm.isEmpty()) {
+            if (strictMasterPlant) errs.add("Plant \"" + pv + "\" not in plant master");
+            else warns.add("Plant \"" + pv + "\" not in plant master");
+        }
         String plant = pm.map(Plant::getName).orElse(pv);
         String bu = ctx.bu(s.apply("bu"));
         if (bu.isEmpty()) bu = pm.map(Plant::getBuCode).orElse("");
@@ -202,7 +221,11 @@ public class ImportService {
         if (cost == 0) warns.add("No unit cost / value — value will show as ₹0");
         Map<String, LocalDate> dates = new HashMap<>();
         for (String f : List.of("receiptDate", "lyingSince", "mfgDate", "expiryDate", "lastIssueDate")) {
-            try { dates.put(f, Parsing.date(raw.get(f))); } catch (IllegalArgumentException e) { warns.add(e.getMessage()); dates.put(f, null); }
+            try { dates.put(f, Parsing.date(raw.get(f))); } catch (IllegalArgumentException e) {
+                if (strictMasterPlant) errs.add(e.getMessage());
+                else warns.add(e.getMessage());
+                dates.put(f, null);
+            }
         }
         if (dates.get("receiptDate") == null && dates.get("lyingSince") == null) warns.add("No GR Posting Date — inventory age cannot be calculated");
         if (dates.get("mfgDate") != null && dates.get("expiryDate") != null && dates.get("expiryDate").isBefore(dates.get("mfgDate"))) warns.add("SLED/BBD is before Date of Manufacture");
@@ -211,7 +234,7 @@ public class ImportService {
         String code = s.apply("code"), name = s.apply("name");
         if (code.isEmpty()) errs.add("Material code missing");
         if (name.isEmpty()) { name = code; if (!code.isEmpty()) warns.add("Description missing — code used"); }
-        if (!plant.isEmpty() && pm.isPresent() && !current.inScope(plant)) errs.add("Plant outside your data access");
+        if (!plant.isEmpty() && allowedScope != null && !allowedScope.contains(plant)) errs.add("Plant \"" + plant + "\" outside your data access");
 
         InventoryItem it = new InventoryItem();
         it.setBuCode(bu.isEmpty() ? "API" : bu); it.setPlant(plant); it.setMatType(cat); it.setDepartment(dept);
@@ -306,6 +329,101 @@ public class ImportService {
         return new ImportResult(file.getOriginalFilename(), sap ? "SAPSTOCK" : "APP", mode, rows.size(), uniq.size(),
                 (int) ok.stream().filter(b -> !b.warns().isEmpty()).count(), built.size() - ok.size(),
                 commit ? added : uniq.size() - updates, commit ? updated : updates, value, missing, preview, commit);
+    }
+
+    /**
+     * Reuses the core SAP/App Excel import engine for Automatic Daily SAP Inventory Import (and manual Run-Now).
+     * Validates the entire file before replacing inventory within the authorized scope (`REPLACE_IN_SCOPE`).
+     * If any non-excluded validation error occurs, throws an IllegalArgumentException before any destructive DB change.
+     */
+    @Transactional
+    public ImportResult runAutomatedReplaceInScope(
+            byte[] fileBytes,
+            String fileName,
+            Set<String> allowedPlants,
+            String executedBy,
+            String sourceLabel) throws Exception {
+        List<Map<String, String>> rows = readBytes(fileBytes, fileName);
+        if (rows.isEmpty()) throw new IllegalArgumentException("No data rows found in Excel file '" + fileName + "'");
+
+        boolean sap = rows.get(0).keySet().stream().anyMatch(k -> Parsing.norm(k).equals("unrestricted") || Parsing.norm(k).equals("material"));
+        List<String> missing = new ArrayList<>();
+        List<Built> built = map(rows, sap, missing, allowedPlants, true);
+
+        // Validate required columns: Material Code and Plant must be mapped
+        if (missing.contains("code") || missing.contains("plant")) {
+            List<String> reqMissing = new ArrayList<>();
+            if (missing.contains("code")) reqMissing.add("Material / Material Code");
+            if (missing.contains("plant")) reqMissing.add("Plant");
+            throw new IllegalArgumentException("Missing required SAP columns: " + String.join(", ", reqMissing));
+        }
+
+        // Check non-excluded validation errors — abort before any destructive replacement if invalid rows exist
+        List<Built> failedRows = built.stream().filter(b -> !b.errs().isEmpty() && !b.excluded()).toList();
+        if (!failedRows.isEmpty()) {
+            Built firstFail = failedRows.get(0);
+            String errSummary = "Row " + firstFail.src() + ": " + String.join("; ", firstFail.errs());
+            if (failedRows.size() > 1) {
+                errSummary += " (and " + (failedRows.size() - 1) + " more invalid row(s))";
+            }
+            throw new IllegalArgumentException("Validation failed — existing inventory preserved. " + errSummary);
+        }
+
+        List<Built> ok = built.stream().filter(b -> b.errs().isEmpty()).toList();
+        if (ok.isEmpty()) {
+            throw new IllegalArgumentException("Validation failed — no valid inventory rows found to import.");
+        }
+
+        // Deduplicate within the file by (plant|code|batch): keep last occurrence
+        Map<String, Built> uniq = new LinkedHashMap<>();
+        ok.forEach(b -> uniq.put(b.rec().itemKey(), b));
+
+        Thresholds t = settings.thresholds();
+        double value = uniq.values().stream().mapToDouble(b -> calc.calc(b.rec(), t).value()).sum();
+
+        // Replace only records within the authorized scope
+        if (allowedPlants == null) {
+            repo.deleteAllInBatch();
+        } else if (!allowedPlants.isEmpty()) {
+            repo.deleteByPlantIn(allowedPlants);
+        } else {
+            throw new IllegalArgumentException("Authorized plant scope is empty — cannot replace inventory.");
+        }
+        repo.flush();
+
+        List<InventoryItem> toSave = uniq.values().stream().map(Built::rec).toList();
+        repo.saveAll(toSave);
+        repo.flush();
+        int added = toSave.size();
+        int skipped = built.size() - ok.size();
+
+        String actor = (executedBy != null && !executedBy.isBlank()) ? executedBy : current.username().orElse("system");
+        String src = (sourceLabel != null && !sourceLabel.isBlank()) ? sourceLabel : "Auto SAP import (" + fileName + ")";
+
+        SyncLog l = new SyncLog();
+        l.setSource(src);
+        l.setRecords(uniq.size());
+        l.setStatus("OK");
+        l.setMessage(added + " added · 0 updated · " + skipped + " skipped");
+        syncLog.save(l);
+
+        settings.update(Map.of("sync.source", src, "sync.lastRefresh", java.time.OffsetDateTime.now().toString()), actor);
+        snapshots.take("auto", null, null);
+        audit.log("Imported inventory", fileName + " · REPLACE_IN_SCOPE · " + added + " added", "inventory", null, actor);
+
+        List<ImportRow> preview = built.stream().limit(300).map(b -> {
+            InventoryItem r = b.rec();
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("plant", r.getPlant()); m.put("matType", r.getMatType()); m.put("dept", r.getDepartment()); m.put("code", r.getCode());
+            m.put("name", r.getName()); m.put("batch", r.getBatch()); m.put("u", r.getUnrestrictedQty()); m.put("q", r.getQualityQty()); m.put("b", r.getBlockedQty());
+            m.put("unitCost", r.getUnitCost()); m.put("receiptDate", r.getReceiptDate()); m.put("expiryDate", r.getExpiryDate());
+            String st = !b.errs().isEmpty() ? (b.excluded() ? "Excluded" : "Error") : !b.warns().isEmpty() ? "Warning" : "OK";
+            return new ImportRow(b.src(), st, m, b.errs(), b.warns());
+        }).toList();
+
+        return new ImportResult(fileName, sap ? "SAPSTOCK" : "APP", "REPLACE_IN_SCOPE", rows.size(), uniq.size(),
+                (int) ok.stream().filter(b -> !b.warns().isEmpty()).count(), skipped,
+                added, 0, value, missing, preview, true);
     }
 
     private static void copy(InventoryItem s, InventoryItem d) {

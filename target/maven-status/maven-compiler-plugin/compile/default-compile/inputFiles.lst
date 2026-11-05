@@ -6,8 +6,10 @@ C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backe
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\domain\AppSetting.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\domain\AppUser.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\domain\AuditLog.java
+C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\domain\AutomaticImportConfiguration.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\domain\BusinessUnit.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\domain\Constants.java
+C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\domain\ImportHistory.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\domain\InventoryItem.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\domain\InventorySnapshot.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\domain\MaterialGroupMap.java
@@ -30,7 +32,9 @@ C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backe
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\repo\AppSettingRepository.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\repo\AppUserRepository.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\repo\AuditLogRepository.java
+C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\repo\AutomaticImportConfigurationRepository.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\repo\BusinessUnitRepository.java
+C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\repo\ImportHistoryRepository.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\repo\InventoryItemRepository.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\repo\InventorySnapshotRepository.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\repo\MaterialGroupMapRepository.java
@@ -44,6 +48,7 @@ C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backe
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\service\AnalyticsService.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\service\AuditService.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\service\AuthService.java
+C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\service\AutomaticImportService.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\service\CalcService.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\service\CurrentUserService.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\service\ExportService.java
@@ -60,6 +65,7 @@ C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backe
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\web\AdminController.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\web\ApiExceptionHandler.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\web\AuthController.java
+C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\web\AutomaticImportController.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\web\BusinessUnitController.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\web\InventoryController.java
 C:\NEW_FRONTEND\Inventory_Management\unichem-inventory 1\unichem-inventory\backend\src\main\java\com\unichem\inventory\web\MasterController.java

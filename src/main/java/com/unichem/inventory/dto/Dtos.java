@@ -117,4 +117,73 @@ public final class Dtos {
             Long organizationId,
             String organizationName,
             List<HierarchyBusinessUnitDto> businessUnits) {}
+
+    public record AutomaticImportConfigRequest(
+            Long organizationId,
+            String configuredFolderPath,
+            String configuredFileName,
+            String configuredFilePath,
+            Integer importFrequencyHours,
+            String importMode,
+            Boolean enabled,
+            Boolean skipUnchangedFile,
+            String scopeBuCode,
+            String scopePlantName) {}
+
+    public record AutomaticImportConfigDto(
+            Long id,
+            Long organizationId,
+            boolean enabled,
+            String configuredFolderPath,
+            String configuredFileName,
+            String configuredFilePath,
+            int importFrequencyHours,
+            String importMode,
+            boolean skipUnchangedFile,
+            String scopeBuCode,
+            String scopePlantName,
+            java.time.OffsetDateTime firstExecutionAt,
+            java.time.OffsetDateTime lastExecutionAt,
+            java.time.OffsetDateTime lastSuccessfulImportAt,
+            java.time.OffsetDateTime nextExecutionAt,
+            String lastImportStatus,
+            String lastImportMessage,
+            java.time.OffsetDateTime createdAt,
+            java.time.OffsetDateTime updatedAt,
+            String createdBy,
+            String updatedBy) {}
+
+    public record AutomaticImportStatusDto(
+            boolean enabled,
+            String status,
+            String configuredFolderPath,
+            String configuredFileName,
+            String configuredFilePath,
+            int importFrequencyHours,
+            String importMode,
+            java.time.OffsetDateTime firstExecutionAt,
+            java.time.OffsetDateTime lastExecutionAt,
+            java.time.OffsetDateTime lastSuccessfulImportAt,
+            java.time.OffsetDateTime nextExecutionAt,
+            String lastImportMessage) {}
+
+    public record ImportHistoryDto(
+            Long id,
+            Long configurationId,
+            String fileName,
+            String filePath,
+            long fileSize,
+            java.time.OffsetDateTime fileModifiedAt,
+            String importType,
+            java.time.OffsetDateTime importStartedAt,
+            java.time.OffsetDateTime importCompletedAt,
+            int totalRecords,
+            int successfulRecords,
+            int failedRecords,
+            int addedRecords,
+            int updatedRecords,
+            String status,
+            String errorMessage,
+            String executedBy,
+            long executionDuration) {}
 }
