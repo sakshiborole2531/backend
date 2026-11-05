@@ -1,0 +1,35 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+spring:
+  application:
+    name: unichem-inventory
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/unichem_inventory}
+    username: ${DB_USER_Inventory:postgres}
+    password: ${DB_PASSWORD_Inventory:postgres}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate.jdbc.batch_size: 200
+      hibernate.order_inserts: true
+      hibernate.order_updates: true
+  flyway:
+    enabled: true
+  servlet:
+    multipart:
+      max-file-size: 25MB
+      max-request-size: 25MB
+app:
+  jwt:
+    # 256-bit secret, base64. Override in every real environment: APP_JWT_SECRET
+    secret: ${APP_JWT_SECRET:dW5pY2hlbS1pbnZlbnRvcnktZGV2LXNlY3JldC1jaGFuZ2UtbWUtMjU2Yml0cyE=}
+    ttl-minutes: ${APP_JWT_TTL:480}
+  cors:
+    allowed-origins: ${APP_CORS_ORIGINS:http://localhost:4200}
+logging:
+  level:
+    org.hibernate.SQL: warn
