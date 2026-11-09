@@ -534,16 +534,63 @@ public class AutomaticImportService {
             throw new IllegalArgumentException("File name must not contain directory separators: " + fileNameStr);
         }
 
+        Path folder = validateSyntaxPath(folderPathStr.trim()).toAbsolutePath().normalize();
+
+        // Enforce authorized directory whitelist
+        boolean allowed = allowedBaseDirectories.stream().anyMatch(folder::startsWith);
+        if (!allowed) {
+            throw new IllegalArgumentException("Directory '" + folder + "' is not an authorized import directory");
+        }
+
+        // Dynamic file resolution: if fileName is "*", "AUTO", "LATEST", or contains "*", find the most recently modified Excel file
+        boolean isDynamic = fileNameStr.equalsIgnoreCase("AUTO")
+                || fileNameStr.equalsIgnoreCase("LATEST")
+                || fileNameStr.contains("*");
+
+        if (isDynamic && verifyExistsAndReadable) {
+            if (Files.exists(folder) && Files.isDirectory(folder) && Files.isReadable(folder)) {
+                try (var stream = Files.list(folder)) {
+                    final String pattern = (fileNameStr.equalsIgnoreCase("AUTO") || fileNameStr.equalsIgnoreCase("LATEST") || fileNameStr.equals("*"))
+                            ? null
+                            : fileNameStr.replace("*", ".*").toLowerCase(Locale.ROOT);
+
+                    Optional<Path> latestFile = stream
+                            .filter(Files::isRegularFile)
+                            .filter(Files::isReadable)
+                            .filter(p -> {
+                                String name = p.getFileName().toString();
+                                String lower = name.toLowerCase(Locale.ROOT);
+                                if (SUPPORTED_EXTENSIONS.stream().noneMatch(lower::endsWith)) return false;
+                                if (name.startsWith("~$")) return false; // skip temporary excel lock files
+                                return pattern == null || lower.matches(pattern);
+                            })
+                            .max(Comparator.comparingLong(p -> {
+                                try {
+                                    return Files.getLastModifiedTime(p).toMillis();
+                                } catch (IOException e) {
+                                    return 0L;
+                                }
+                            }));
+
+                    if (latestFile.isPresent()) {
+                        Path found = latestFile.get();
+                        return new ResolvedPaths(folder, found.getFileName().toString(), found);
+                    }
+                } catch (IOException e) {
+                    log.warn("Failed to dynamically list files in {}: {}", folder, e.getMessage());
+                }
+            }
+        }
+
         String lowerFile = fileNameStr.trim().toLowerCase(Locale.ROOT);
-        boolean validExt = SUPPORTED_EXTENSIONS.stream().anyMatch(lowerFile::endsWith);
+        boolean validExt = isDynamic || SUPPORTED_EXTENSIONS.stream().anyMatch(lowerFile::endsWith);
         if (!validExt) {
             throw new IllegalArgumentException("Unsupported Excel file format for '" + fileNameStr + "'. Only .xlsx and .xls files are supported.");
         }
 
-        Path folder = validateSyntaxPath(folderPathStr.trim()).toAbsolutePath().normalize();
         Path file = folder.resolve(fileNameStr.trim()).normalize();
 
-        if (fullFilePathStr != null && !fullFilePathStr.isBlank()) {
+        if (fullFilePathStr != null && !fullFilePathStr.isBlank() && !isDynamic) {
             Path explicitFile = validateSyntaxPath(fullFilePathStr.trim()).toAbsolutePath().normalize();
             if (!explicitFile.equals(file)) {
                 // Ensure explicit file is inside the configured folder and has a valid extension
@@ -562,12 +609,6 @@ public class AutomaticImportService {
 
         if (!file.startsWith(folder)) {
             throw new IllegalArgumentException("Resolved file path escapes the configured folder path");
-        }
-
-        // Enforce authorized directory whitelist
-        boolean allowed = allowedBaseDirectories.stream().anyMatch(folder::startsWith);
-        if (!allowed) {
-            throw new IllegalArgumentException("Directory '" + folder + "' is not an authorized import directory");
         }
 
         if (verifyExistsAndReadable) {

@@ -41,7 +41,13 @@ public class MasterController {
     @PostMapping("/storage-locations") @PreAuthorize("hasAuthority('masters.edit')") public StorageLocation sloc(@RequestBody StorageLocation s) { return masters.saveSloc(s); }
     @DeleteMapping("/storage-locations/{id}") @PreAuthorize("hasAuthority('masters.edit')") public void delSloc(@PathVariable Long id) { masters.deleteSloc(id); }
 
+    @GetMapping("/material-types") public List<MaterialTypeMap> getAllMaterialTypes() { return masters.getAllMaterialTypes(); }
+    @GetMapping("/material-types/{code}") public MaterialTypeMap getMaterialType(@PathVariable String code) { return masters.getMaterialTypeByIdentifier(code); }
     @PostMapping("/material-types") @PreAuthorize("hasAuthority('masters.edit')") public MaterialTypeMap mt(@RequestBody MaterialTypeMap m) { return masters.saveMtype(m); }
+    @PutMapping("/material-types/{code}") @PreAuthorize("hasAuthority('masters.edit')") public MaterialTypeMap updateMt(@PathVariable String code, @RequestBody MaterialTypeMap m) {
+        if (m.getSapCode() == null || m.getSapCode().isBlank()) m.setSapCode(code);
+        return masters.saveMtype(m);
+    }
     @DeleteMapping("/material-types/{code}") @PreAuthorize("hasAuthority('masters.edit')") public void delMt(@PathVariable String code) { masters.deleteMtype(code); }
 
     @PostMapping("/material-groups") @PreAuthorize("hasAuthority('masters.edit')") public MaterialGroupMap mg(@RequestBody MaterialGroupMap m) { return masters.saveMgroup(m); }

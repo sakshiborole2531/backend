@@ -56,7 +56,54 @@ public final class Dtos {
     public record PlantSidebarDto(Long id, String code, String name, boolean active, int order, String buCode, String city) {}
     public record BusinessUnitSidebarDto(String id, String code, String name, boolean active, int order, String alias, int plantCount) {}
     public record StorageLocationSidebarDto(Long id, String code, String name, String plantCode, String plantName, String storageType, boolean active, int order) {}
-    public record MaterialTypeSidebarDto(String id, String code, String name, boolean active, int order, String category, String department) {}
+    public record MaterialTypeSidebarDto(String id, String code, String name, boolean active, int order, String category, String businessUnit, String department) {}
+
+    public record MaterialTypeRequest(
+            String id,
+            String materialType,
+            String sapCode,
+            String description,
+            String numberSeries,
+            String dashboardCategory,
+            String category,
+            String businessUnit,
+            String defaultDepartment,
+            String department,
+            Boolean active,
+            Integer sortOrder) {}
+
+    public record MaterialTypeResponse(
+            String id,
+            String materialType,
+            String sapCode,
+            String description,
+            String numberSeries,
+            String dashboardCategory,
+            String category,
+            String businessUnit,
+            String defaultDepartment,
+            String department,
+            boolean active,
+            int sortOrder) {
+
+        public static MaterialTypeResponse from(com.unichem.inventory.domain.MaterialTypeMap m) {
+            if (m == null) return null;
+            return new MaterialTypeResponse(
+                    m.getSapCode(),
+                    m.getSapCode(),
+                    m.getSapCode(),
+                    m.getDescription(),
+                    m.getNumberSeries(),
+                    m.getCategory(),
+                    m.getCategory(),
+                    m.getBusinessUnit(),
+                    m.getDepartment(),
+                    m.getDepartment(),
+                    m.isActive(),
+                    m.getSortOrder()
+            );
+        }
+    }
     public record SidebarCountsDto(int plants, int businessUnits, int storageLocations, int materialTypes) {}
     public record SidebarResponseDto(
             List<PlantSidebarDto> plants,

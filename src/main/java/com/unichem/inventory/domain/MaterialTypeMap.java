@@ -10,6 +10,7 @@ public class MaterialTypeMap {
     private String description;
     @Column(name = "number_series") private String numberSeries;
     @Column(nullable = false) private String category;
+    @Column(name = "business_unit") private String businessUnit;
     private String department;
     private boolean active = true;
     @Column(name = "sort_order") private int sortOrder;

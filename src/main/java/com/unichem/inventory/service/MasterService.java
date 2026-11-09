@@ -166,6 +166,7 @@ public class MasterService {
                     true,
                     order,
                     t.getCategory(),
+                    t.getBusinessUnit(),
                     t.getDepartment()
             ));
             mtIdx++;
@@ -273,12 +274,34 @@ public class MasterService {
     }
     @Transactional public void deleteSloc(Long id) { slocs.deleteById(id); audit.log("Master deleted", "Storage location " + id); }
 
+    public List<MaterialTypeMap> getAllMaterialTypes() {
+        return mtypes.findAllByOrderBySortOrderAscSapCodeAsc();
+    }
+
+    public MaterialTypeMap getMaterialTypeByIdentifier(String code) {
+        if (code == null || code.isBlank()) throw new IllegalArgumentException("Material type code is required");
+        return mtypes.findById(code.trim())
+                .or(() -> mtypes.findBySapCodeIgnoreCase(code.trim()))
+                .orElseThrow(() -> new NotFoundException("Material type '" + code + "' not found"));
+    }
+
     @Transactional public MaterialTypeMap saveMtype(MaterialTypeMap m) {
         if (m.getSapCode() == null || m.getSapCode().isBlank()) throw new IllegalArgumentException("Material type code is required");
         if (!MAT_TYPES.contains(m.getCategory()) && !"Exclude".equals(m.getCategory())) throw new IllegalArgumentException("Invalid category " + m.getCategory());
         m.setSapCode(m.getSapCode().trim());
         if (m.getDepartment() != null && m.getDepartment().isBlank()) m.setDepartment(null);
-        audit.log("Master saved", "Material type " + m.getSapCode() + " → " + m.getCategory() + (m.isActive() ? "" : " · inactive"));
+        if (m.getBusinessUnit() != null) {
+            String trimmedBu = m.getBusinessUnit().trim();
+            if (trimmedBu.isEmpty()) {
+                m.setBusinessUnit(null);
+            } else {
+                BusinessUnit bu = bus.findById(trimmedBu)
+                        .or(() -> bus.findAll().stream().filter(b -> b.getCode().equalsIgnoreCase(trimmedBu) || b.getName().equalsIgnoreCase(trimmedBu)).findFirst())
+                        .orElseThrow(() -> new IllegalArgumentException("Business unit '" + trimmedBu + "' does not exist in master"));
+                m.setBusinessUnit(bu.getCode());
+            }
+        }
+        audit.log("Master saved", "Material type " + m.getSapCode() + " → " + m.getCategory() + (m.getBusinessUnit() != null ? " · BU: " + m.getBusinessUnit() : "") + (m.isActive() ? "" : " · inactive"));
         return mtypes.save(m);
     }
     @Transactional public void deleteMtype(String code) { mtypes.deleteById(code); audit.log("Master deleted", "Material type " + code); }
