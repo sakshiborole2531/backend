@@ -10,8 +10,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -35,6 +34,21 @@ public class AuthController {
     @PostMapping("/access-request") public void request(@Valid @RequestBody AccessRequestDto r) { users.submitRequest(r); }
 
     @GetMapping("/me") public MeResponse me() { return auth.me(); }
+    @GetMapping("/me/permissions")
+    public Map<String, Object> mePermissions() {
+        var u = current.require();
+        Set<String> perms = current.permissions(u);
+        Set<String> bus = current.allowedBusinessUnits(u);
+        Set<String> plants = current.allowedPlants(u);
+        Map<String, Object> body = new LinkedHashMap<>();
+        Map<String, Object> permMap = new LinkedHashMap<>();
+        permMap.put("actions", perms);
+        permMap.put("businessUnits", bus != null ? new ArrayList<>(bus) : List.of("ALL"));
+        permMap.put("plants", plants != null ? new ArrayList<>(plants) : List.of("ALL"));
+        permMap.put("scopeAll", bus == null);
+        body.put("permissions", permMap);
+        return body;
+    }
     @PutMapping("/me") public MeResponse profile(@Valid @RequestBody ProfileUpdate p) { return auth.updateProfile(p); }
     @PostMapping("/change-password") public void change(@Valid @RequestBody ChangePasswordRequest r) { auth.changePassword(r); }
     @PostMapping("/verify") public void verify(@RequestBody Map<String, String> b) { auth.verifyPassword(b.get("password")); }

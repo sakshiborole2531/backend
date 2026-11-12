@@ -19,7 +19,9 @@ public final class Dtos {
     public record MeResponse(Long id, String username, String name, String email, String phone, String empId,
                              String designation, String department, String location, String functionName,
                              String role, String roleLabel, boolean scopeAll, Set<String> scopeBus, Set<String> scopeUnits,
-                             Set<String> permissions, boolean mustChange, String theme, String lastLogin, String validUntil) {}
+                             Set<String> permissions, List<String> allowedBusinessUnits, boolean mustChange, String theme,
+                             String lastLogin, String validUntil) {}
+    public record UserPermissionsResponse(Set<String> actions, List<String> businessUnits, List<String> plants, boolean scopeAll) {}
     public record ProfileUpdate(@NotBlank String name, @Email String email, String phone, String empId, String designation,
                                 String department, String location, String theme) {}
 

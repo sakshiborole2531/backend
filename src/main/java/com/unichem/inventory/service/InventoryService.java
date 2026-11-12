@@ -52,6 +52,12 @@ public class InventoryService {
     /** All records the user may see (data scope + active plants), calculated as of today. */
     @Transactional(readOnly = true)
     public List<CalcItem> calculated(Filter f) {
+        if (f != null && f.bu() != null && !Filter.all(f.bu())) {
+            current.requireBuScope(f.bu());
+        }
+        if (f != null && f.plant() != null && !Filter.all(f.plant())) {
+            current.requireScope(f.plant());
+        }
         Thresholds t = settings.thresholds();
         Set<String> visible = current.visiblePlants();
         Set<String> inactive = current.inactivePlants();

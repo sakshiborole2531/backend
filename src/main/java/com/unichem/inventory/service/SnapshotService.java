@@ -78,6 +78,12 @@ public class SnapshotService {
     /** Year-wise comparison within the user's data scope (closing = last snapshot in FY, avg = mean of month-ends). */
     @Transactional(readOnly = true)
     public Map<String, Object> yearwise(String basis, String bu, String plant) {
+        if (bu != null && !bu.isBlank() && !"All".equalsIgnoreCase(bu.trim())) {
+            current.requireBuScope(bu);
+        }
+        if (plant != null && !plant.isBlank() && !"All".equalsIgnoreCase(plant.trim())) {
+            current.requireScope(plant);
+        }
         Set<String> allowed = current.allowedPlants();
         Set<String> inactive = current.inactivePlants();
         List<InventorySnapshot> all = repo.findAllWithRows();

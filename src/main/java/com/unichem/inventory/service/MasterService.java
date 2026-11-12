@@ -636,20 +636,8 @@ public class MasterService {
     }
 
     private Set<String> resolveAllowedBuCodes(AppUser me) {
-        boolean scopeAll = me == null || me.isScopeAll() || "admin".equalsIgnoreCase(me.getRoleCode());
-        if (scopeAll || me == null) return null;
-        Set<String> allowedBuCodes = new HashSet<>();
-        if (me.getScopeBus() != null) {
-            allowedBuCodes.addAll(me.getScopeBus());
-        }
-        if (me.getScopeUnits() != null) {
-            for (Plant p : plants.findAll()) {
-                if (me.getScopeUnits().contains(p.getName()) && p.getBuCode() != null) {
-                    allowedBuCodes.add(p.getBuCode());
-                }
-            }
-        }
-        return allowedBuCodes;
+        if (me == null) return null;
+        return current.allowedBusinessUnits(me);
     }
 
     private BusinessUnit resolveBuByIdentifier(String idOrCode) {

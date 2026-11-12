@@ -130,9 +130,11 @@ public class AuthService {
 
     public MeResponse me(AppUser u) {
         AppRole r = roles.findById(u.getRoleCode()).orElse(null);
+        Set<String> buSet = current.allowedBusinessUnits(u);
+        List<String> allowedBus = buSet == null ? null : new ArrayList<>(buSet);
         return new MeResponse(u.getId(), u.getUsername(), u.getName(), u.getEmail(), u.getPhone(), u.getEmpId(), u.getDesignation(),
                 u.getDepartment(), u.getLocation(), u.getFunctionName(), u.getRoleCode(), r == null ? u.getRoleCode() : r.getLabel(),
-                u.isScopeAll(), u.getScopeBus(), u.getScopeUnits(), current.permissions(u), u.isMustChange(), u.getTheme(),
+                u.isScopeAll(), u.getScopeBus(), u.getScopeUnits(), current.permissions(u), allowedBus, u.isMustChange(), u.getTheme(),
                 u.getLastLogin() == null ? null : u.getLastLogin().toString(), u.getValidUntil() == null ? null : u.getValidUntil().toString());
     }
 }

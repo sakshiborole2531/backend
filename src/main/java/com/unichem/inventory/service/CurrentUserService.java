@@ -51,7 +51,7 @@ public class CurrentUserService {
 
     /** null = entire organization. */
     public Set<String> allowedPlants(AppUser u) {
-        if (u.isScopeAll()) return null;
+        if (u.isScopeAll() || "admin".equalsIgnoreCase(u.getRoleCode())) return null;
         Set<String> s = new HashSet<>(u.getScopeUnits());
         if (!u.getScopeBus().isEmpty()) {
             for (Plant p : plants.findAll()) if (u.getScopeBus().contains(p.getBuCode())) s.add(p.getName());
@@ -60,6 +60,44 @@ public class CurrentUserService {
     }
 
     public Set<String> allowedPlants() { return allowedPlants(require()); }
+
+    /** null = entire organization. Otherwise returns the set of Business Unit codes allowed for this user. */
+    public Set<String> allowedBusinessUnits(AppUser u) {
+        if (u.isScopeAll() || "admin".equalsIgnoreCase(u.getRoleCode())) return null;
+        Set<String> allowed = new LinkedHashSet<>();
+        if (u.getScopeBus() != null) {
+            for (String b : u.getScopeBus()) {
+                if (b != null && !b.isBlank()) allowed.add(b.trim());
+            }
+        }
+        if (u.getScopeUnits() != null && !u.getScopeUnits().isEmpty()) {
+            for (Plant p : plants.findAll()) {
+                if (u.getScopeUnits().contains(p.getName()) && p.getBuCode() != null && !p.getBuCode().isBlank()) {
+                    allowed.add(p.getBuCode().trim());
+                }
+            }
+        }
+        return allowed;
+    }
+
+    public Set<String> allowedBusinessUnits() { return allowedBusinessUnits(require()); }
+
+    public boolean inBuScope(String bu) {
+        if (bu == null || bu.isBlank() || "All".equalsIgnoreCase(bu.trim())) return true;
+        Set<String> allowed = allowedBusinessUnits();
+        if (allowed == null) return true;
+        String target = bu.trim();
+        for (String b : allowed) {
+            if (b.equalsIgnoreCase(target)) return true;
+        }
+        return false;
+    }
+
+    public void requireBuScope(String bu) {
+        if (!inBuScope(bu)) {
+            throw new AccessDeniedException("Business Unit '" + bu + "' is outside your data access");
+        }
+    }
 
     public boolean inScope(String plant) { Set<String> a = allowedPlants(); return a == null || a.contains(plant); }
 
