@@ -37,7 +37,19 @@ public class MasterLookup {
             }
             return "";
         }
-        public Optional<MaterialTypeMap> mtype(String v) { return v == null ? Optional.empty() : mtypes.stream().filter(m -> m.getSapCode().equalsIgnoreCase(v.trim())).findFirst(); }
+        public Optional<MaterialTypeMap> mtype(String v) { return mtype(v, null); }
+        public Optional<MaterialTypeMap> mtype(String v, String bu) {
+            if (v == null || v.isBlank()) return Optional.empty();
+            String t = v.trim();
+            if (bu != null && !bu.isBlank()) {
+                String b = bu.trim();
+                Optional<MaterialTypeMap> match = mtypes.stream()
+                        .filter(m -> m.getSapCode().equalsIgnoreCase(t) && m.getBusinessUnit() != null && m.getBusinessUnit().equalsIgnoreCase(b))
+                        .findFirst();
+                if (match.isPresent()) return match;
+            }
+            return mtypes.stream().filter(m -> m.getSapCode().equalsIgnoreCase(t)).findFirst();
+        }
         public Optional<MaterialGroupMap> mgroup(String v) { return v == null ? Optional.empty() : mgroups.stream().filter(m -> m.getSapCode().equalsIgnoreCase(v.trim())).findFirst(); }
         public Optional<StorageLocation> sloc(String v, String plant) {
             if (v == null || v.isBlank()) return Optional.empty();

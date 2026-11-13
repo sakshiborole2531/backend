@@ -27,6 +27,8 @@ public class ApiExceptionHandler {
     }
 
     @ExceptionHandler(NotFoundException.class) ProblemDetail nf(NotFoundException e) { return pd(HttpStatus.NOT_FOUND, e.getMessage()); }
+    @ExceptionHandler(DuplicateMaterialTypeException.class) ProblemDetail dupMaterialTypeCode(DuplicateMaterialTypeException e) { return pd(HttpStatus.BAD_REQUEST, e.getMessage()); }
+    @ExceptionHandler(DuplicateMaterialTypeMappingException.class) ProblemDetail dupMaterialType(DuplicateMaterialTypeMappingException e) { return pd(HttpStatus.BAD_REQUEST, e.getMessage()); }
     @ExceptionHandler(IllegalArgumentException.class) ProblemDetail bad(IllegalArgumentException e) { return pd(HttpStatus.BAD_REQUEST, e.getMessage()); }
     @ExceptionHandler(IllegalStateException.class) ProblemDetail conflict(IllegalStateException e) { return pd(HttpStatus.CONFLICT, e.getMessage()); }
     @ExceptionHandler(AccessDeniedException.class) ProblemDetail denied(AccessDeniedException e) { return pd(HttpStatus.FORBIDDEN, e.getMessage()); }
@@ -37,6 +39,13 @@ public class ApiExceptionHandler {
     @ExceptionHandler(DataIntegrityViolationException.class)
     ProblemDetail integrity(DataIntegrityViolationException e) {
         String m = e.getMostSpecificCause().getMessage();
+        if (m != null && (m.contains("material_type_map_pkey") || m.contains("uq_material_type_code"))) {
+            return pd(HttpStatus.BAD_REQUEST, "Duplicate Material Type code found. Material Types must be unique.");
+        }
+        if (m != null && (m.contains("uq_material_type_composite") || m.contains("material_type_composite")))
+            return pd(HttpStatus.BAD_REQUEST, "Duplicate entry found: The combination of Material Type, Dashboard Category, and Business Unit must be unique.");
+        if (m != null && m.contains("uq_material_type_cat_bu"))
+            return pd(HttpStatus.BAD_REQUEST, "Duplicate entry found: The combination of Material Type, Dashboard Category, and Business Unit must be unique.");
         if (m != null && m.contains("uq_action_open_item")) return pd(HttpStatus.CONFLICT, "This batch already has an open action.");
         if (m != null && m.contains("uq_inventory_key")) return pd(HttpStatus.CONFLICT, "A record with this plant + material + batch already exists.");
         if (m != null && m.contains("uq_business_unit_org_code")) return pd(HttpStatus.CONFLICT, "Business Unit with this name already exists.");

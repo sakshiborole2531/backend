@@ -193,7 +193,7 @@ public class ImportService {
         if (bu.isEmpty()) bu = pm.map(Plant::getBuCode).orElse("");
         boolean excluded = false;
         String mtv = s.apply("matType");
-        Optional<MaterialTypeMap> mt = ctx.mtype(mtv);
+        Optional<MaterialTypeMap> mt = ctx.mtype(mtv, bu);
         String cat = mt.map(MaterialTypeMap::getCategory).filter(MAT_TYPES::contains).orElse(mt.isPresent() ? "" : MasterLookup.catFromText(mtv));
         Optional<MaterialGroupMap> mg = ctx.mgroup(s.apply("matGroup"));
         if (mt.isPresent() && "Exclude".equals(mt.get().getCategory())) { errs.add("Excluded: material type " + mtv + " is not tracked as inventory"); excluded = true; }

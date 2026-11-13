@@ -90,8 +90,9 @@ public final class Dtos {
 
         public static MaterialTypeResponse from(com.unichem.inventory.domain.MaterialTypeMap m) {
             if (m == null) return null;
+            String idStr = m.getId() != null ? String.valueOf(m.getId()) : m.getSapCode();
             return new MaterialTypeResponse(
-                    m.getSapCode(),
+                    idStr,
                     m.getSapCode(),
                     m.getSapCode(),
                     m.getDescription(),

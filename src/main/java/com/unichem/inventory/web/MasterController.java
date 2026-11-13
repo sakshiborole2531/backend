@@ -44,9 +44,9 @@ public class MasterController {
     @GetMapping("/material-types") public List<MaterialTypeMap> getAllMaterialTypes() { return masters.getAllMaterialTypes(); }
     @GetMapping("/material-types/{code}") public MaterialTypeMap getMaterialType(@PathVariable String code) { return masters.getMaterialTypeByIdentifier(code); }
     @PostMapping("/material-types") @PreAuthorize("hasAuthority('masters.edit')") public MaterialTypeMap mt(@RequestBody MaterialTypeMap m) { return masters.saveMtype(m); }
+    @PostMapping("/material-types/batch") @PreAuthorize("hasAuthority('masters.edit')") public List<MaterialTypeMap> saveAllMtypes(@RequestBody List<MaterialTypeMap> list) { return masters.saveAllMtypes(list); }
     @PutMapping("/material-types/{code}") @PreAuthorize("hasAuthority('masters.edit')") public MaterialTypeMap updateMt(@PathVariable String code, @RequestBody MaterialTypeMap m) {
-        if (m.getSapCode() == null || m.getSapCode().isBlank()) m.setSapCode(code);
-        return masters.saveMtype(m);
+        return masters.updateMtype(code, m);
     }
     @DeleteMapping("/material-types/{code}") @PreAuthorize("hasAuthority('masters.edit')") public void delMt(@PathVariable String code) { masters.deleteMtype(code); }
 

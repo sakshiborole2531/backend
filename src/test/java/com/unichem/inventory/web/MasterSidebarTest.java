@@ -55,10 +55,11 @@ class MasterSidebarTest {
     private final Map<Long, Plant> plantStore = new LinkedHashMap<>();
     private final Map<String, BusinessUnit> buStore = new LinkedHashMap<>();
     private final Map<Long, StorageLocation> slocStore = new LinkedHashMap<>();
-    private final Map<String, MaterialTypeMap> mtypeStore = new LinkedHashMap<>();
+    private final Map<Long, MaterialTypeMap> mtypeStore = new LinkedHashMap<>();
     private final Map<String, AppUser> userStore = new LinkedHashMap<>();
     private long nextPlantId = 1L;
     private long nextSlocId = 1L;
+    private long nextMtypeId = 1L;
 
     @BeforeEach
     void setUp() {
@@ -70,6 +71,7 @@ class MasterSidebarTest {
         userStore.clear();
         nextPlantId = 1L;
         nextSlocId = 1L;
+        nextMtypeId = 1L;
 
         currentUserService = new CurrentUserService(users, roles, plants);
         masterService = new MasterService(bus, plants, slocs, mtypes, mgroups, functions, actionTypes, persons, currentUserService, em, audit);
@@ -123,6 +125,27 @@ class MasterSidebarTest {
             return s;
         });
 
+        lenient().when(mtypes.findAll()).thenAnswer(inv -> new ArrayList<>(mtypeStore.values()));
+        lenient().when(mtypes.findById(anyLong())).thenAnswer(inv -> Optional.ofNullable(mtypeStore.get(inv.<Long>getArgument(0))));
+        lenient().when(mtypes.findBySapCodeIgnoreCase(anyString())).thenAnswer(inv -> {
+            String code = inv.getArgument(0);
+            return mtypeStore.values().stream().filter(m -> m.getSapCode().equalsIgnoreCase(code)).findFirst();
+        });
+        lenient().when(mtypes.findAllBySapCodeIgnoreCase(anyString())).thenAnswer(inv -> {
+            String code = inv.getArgument(0);
+            return mtypeStore.values().stream().filter(m -> m.getSapCode().equalsIgnoreCase(code)).toList();
+        });
+        lenient().when(mtypes.findByCompositeKey(anyString(), anyString(), any())).thenAnswer(inv -> {
+            String code = inv.getArgument(0);
+            String cat = inv.getArgument(1);
+            String bu = inv.getArgument(2);
+            return mtypeStore.values().stream()
+                    .filter(m -> m.getSapCode().equalsIgnoreCase(code)
+                            && m.getCategory().equalsIgnoreCase(cat)
+                            && ((bu == null && (m.getBusinessUnit() == null || m.getBusinessUnit().isBlank()))
+                                || (bu != null && m.getBusinessUnit() != null && m.getBusinessUnit().equalsIgnoreCase(bu))))
+                    .findFirst();
+        });
         lenient().when(mtypes.findByActiveTrueOrderByOrderAsc()).thenAnswer(inv ->
                 mtypeStore.values().stream()
                         .filter(MaterialTypeMap::isActive)
@@ -130,7 +153,8 @@ class MasterSidebarTest {
                         .toList());
         lenient().when(mtypes.save(any(MaterialTypeMap.class))).thenAnswer(inv -> {
             MaterialTypeMap m = inv.getArgument(0);
-            mtypeStore.put(m.getSapCode(), m);
+            if (m.getId() == null) m.setId(nextMtypeId++);
+            mtypeStore.put(m.getId(), m);
             return m;
         });
 
@@ -400,5 +424,93 @@ class MasterSidebarTest {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("unknown.user", null, List.of()));
         assertThatThrownBy(() -> masterService.sidebar()).isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    @DisplayName("10. Allow same Material Type code with different Dashboard Category / Business Unit")
+    void allowSameMaterialTypeCodeWithDifferentCategoryOrBu() {
+        buStore.put("FORMULATION", new BusinessUnit("FORMULATION", "Formulation", null, true, 1));
+        buStore.put("API", new BusinessUnit("API", "API BU", null, true, 2));
+
+        MaterialTypeMap mt1 = new MaterialTypeMap();
+        mt1.setSapCode("ZAPI");
+        mt1.setDescription("API in Formulation");
+        mt1.setCategory("Raw Material");
+        mt1.setBusinessUnit("FORMULATION");
+        mt1.setActive(true);
+        masterService.saveMtype(mt1);
+
+        // Same material type code ZAPI, but different BU "API" - allowed!
+        MaterialTypeMap mt2 = new MaterialTypeMap();
+        mt2.setSapCode("ZAPI");
+        mt2.setDescription("API in API BU");
+        mt2.setCategory("Raw Material");
+        mt2.setBusinessUnit("API");
+        mt2.setActive(true);
+
+        MaterialTypeMap saved = masterService.saveMtype(mt2);
+        assertThat(saved).isNotNull();
+        assertThat(saved.getSapCode()).isEqualTo("ZAPI");
+        assertThat(saved.getBusinessUnit()).isEqualTo("API");
+    }
+
+    @Test
+    @DisplayName("11. Allow updating existing Material Type without self-duplicate error")
+    void allowUpdatingExistingMaterialType() {
+        MaterialTypeMap mt1 = new MaterialTypeMap();
+        mt1.setSapCode("ROH");
+        mt1.setDescription("Raw Material");
+        mt1.setCategory("Raw Material");
+        mt1.setActive(true);
+        masterService.saveMtype(mt1);
+
+        mt1.setDescription("Updated Description");
+        MaterialTypeMap updated = masterService.updateMtype("ROH", mt1);
+        assertThat(updated.getDescription()).isEqualTo("Updated Description");
+    }
+
+    @Test
+    @DisplayName("12. Reject duplicate composite (Material Type + Category + BU) in batch payload")
+    void rejectDuplicateCompositeInBatch() {
+        buStore.put("API", new BusinessUnit("API", "API BU", null, true, 1));
+
+        MaterialTypeMap m1 = new MaterialTypeMap();
+        m1.setSapCode("FERT");
+        m1.setCategory("Finished Goods");
+        m1.setBusinessUnit("API");
+        m1.setActive(true);
+
+        MaterialTypeMap m2 = new MaterialTypeMap();
+        m2.setSapCode("FERT");
+        m2.setCategory("Finished Goods");
+        m2.setBusinessUnit("API");
+        m2.setActive(true);
+
+        assertThatThrownBy(() -> masterService.saveAllMtypes(List.of(m1, m2)))
+                .isInstanceOf(DuplicateMaterialTypeMappingException.class)
+                .hasMessage("Duplicate entry found: The combination of Material Type, Dashboard Category, and Business Unit must be unique.");
+    }
+
+    @Test
+    @DisplayName("13. Reject duplicate Material Type + Dashboard Category + Business Unit combination against DB")
+    void rejectDuplicateMaterialTypeCategoryAndBusinessUnitCombination() {
+        buStore.put("API", new BusinessUnit("API", "API BU", null, true, 1));
+
+        MaterialTypeMap mt1 = new MaterialTypeMap();
+        mt1.setSapCode("ZAPI");
+        mt1.setCategory("Raw Material");
+        mt1.setBusinessUnit("API");
+        mt1.setActive(true);
+        masterService.saveMtype(mt1);
+
+        MaterialTypeMap mt2 = new MaterialTypeMap();
+        mt2.setSapCode("ZAPI");
+        mt2.setCategory("Raw Material");
+        mt2.setBusinessUnit("API");
+        mt2.setActive(true);
+
+        assertThatThrownBy(() -> masterService.saveMtype(mt2))
+                .isInstanceOf(DuplicateMaterialTypeMappingException.class)
+                .hasMessage("Duplicate entry found: The combination of Material Type, Dashboard Category, and Business Unit must be unique.");
     }
 }

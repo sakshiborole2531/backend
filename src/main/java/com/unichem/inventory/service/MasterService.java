@@ -278,17 +278,46 @@ public class MasterService {
         return mtypes.findAllByOrderBySortOrderAscSapCodeAsc();
     }
 
-    public MaterialTypeMap getMaterialTypeByIdentifier(String code) {
-        if (code == null || code.isBlank()) throw new IllegalArgumentException("Material type code is required");
-        return mtypes.findById(code.trim())
-                .or(() -> mtypes.findBySapCodeIgnoreCase(code.trim()))
-                .orElseThrow(() -> new NotFoundException("Material type '" + code + "' not found"));
+    public MaterialTypeMap getMaterialTypeByIdentifier(String identifier) {
+        if (identifier == null || identifier.isBlank()) throw new IllegalArgumentException("Material type identifier is required");
+        String trimmed = identifier.trim();
+        // 1. Try parsing as Long ID if numeric
+        try {
+            Long id = Long.parseLong(trimmed);
+            Optional<MaterialTypeMap> byId = mtypes.findById(id);
+            if (byId.isPresent()) return byId.get();
+        } catch (NumberFormatException ignored) {}
+
+        // 2. Lookup by exact / case-insensitive SAP code
+        List<MaterialTypeMap> list = mtypes.findAllBySapCodeIgnoreCase(trimmed);
+        if (!list.isEmpty()) {
+            return list.get(0);
+        }
+        return mtypes.findBySapCodeIgnoreCase(trimmed)
+                .orElseThrow(() -> new NotFoundException("Material type '" + identifier + "' not found"));
     }
 
     @Transactional public MaterialTypeMap saveMtype(MaterialTypeMap m) {
+        return saveMtype(m, false);
+    }
+
+    @Transactional public MaterialTypeMap updateMtype(String identifier, MaterialTypeMap m) {
+        if (identifier != null && !identifier.isBlank()) {
+            String trimmed = identifier.trim();
+            try {
+                Long id = Long.parseLong(trimmed);
+                if (m.getId() == null) m.setId(id);
+            } catch (NumberFormatException ignored) {
+                if (m.getSapCode() == null || m.getSapCode().isBlank()) m.setSapCode(trimmed);
+            }
+        }
+        return saveMtype(m, true);
+    }
+
+    @Transactional public MaterialTypeMap saveMtype(MaterialTypeMap m, boolean isUpdate) {
         if (m.getSapCode() == null || m.getSapCode().isBlank()) throw new IllegalArgumentException("Material type code is required");
-        if (!MAT_TYPES.contains(m.getCategory()) && !"Exclude".equals(m.getCategory())) throw new IllegalArgumentException("Invalid category " + m.getCategory());
         m.setSapCode(m.getSapCode().trim());
+        if (!MAT_TYPES.contains(m.getCategory()) && !"Exclude".equals(m.getCategory())) throw new IllegalArgumentException("Invalid category " + m.getCategory());
         if (m.getDepartment() != null && m.getDepartment().isBlank()) m.setDepartment(null);
         if (m.getBusinessUnit() != null) {
             String trimmedBu = m.getBusinessUnit().trim();
@@ -301,10 +330,116 @@ public class MasterService {
                 m.setBusinessUnit(bu.getCode());
             }
         }
+
+        // Composite existing lookup & duplicate check
+        Optional<MaterialTypeMap> existingOpt = m.getId() != null
+                ? mtypes.findById(m.getId())
+                : mtypes.findByCompositeKey(m.getSapCode(), m.getCategory(), m.getBusinessUnit());
+
+        if (existingOpt.isPresent()) {
+            MaterialTypeMap existing = existingOpt.get();
+            if (isUpdate || (m.getId() != null && m.getId().equals(existing.getId()))) {
+                // Update existing record without creating duplicate or overwriting unrelated record
+                existing.setDescription(m.getDescription());
+                existing.setNumberSeries(m.getNumberSeries());
+                existing.setCategory(m.getCategory());
+                existing.setDepartment(m.getDepartment());
+                existing.setBusinessUnit(m.getBusinessUnit());
+                existing.setActive(m.isActive());
+                existing.setSortOrder(m.getSortOrder());
+                audit.log("Master saved", "Material type " + existing.getSapCode() + " → " + existing.getCategory() + (existing.getBusinessUnit() != null ? " · BU: " + existing.getBusinessUnit() : "") + (existing.isActive() ? "" : " · inactive"));
+                return mtypes.save(existing);
+            } else {
+                // Another record with this exact composite key already exists!
+                throw new com.unichem.inventory.web.DuplicateMaterialTypeMappingException(
+                        "Duplicate entry found: The combination of Material Type, Dashboard Category, and Business Unit must be unique.");
+            }
+        }
+
+        validateNoDuplicateMaterialTypeMapping(m.getId(), m.getSapCode(), m.getCategory(), m.getBusinessUnit());
         audit.log("Master saved", "Material type " + m.getSapCode() + " → " + m.getCategory() + (m.getBusinessUnit() != null ? " · BU: " + m.getBusinessUnit() : "") + (m.isActive() ? "" : " · inactive"));
         return mtypes.save(m);
     }
-    @Transactional public void deleteMtype(String code) { mtypes.deleteById(code); audit.log("Master deleted", "Material type " + code); }
+
+    public void validateNoDuplicateMaterialTypeMapping(Long id, String sapCode, String category, String businessUnit) {
+        if (sapCode == null || sapCode.isBlank() || category == null || category.isBlank()) {
+            return;
+        }
+        String targetCode = sapCode.trim();
+        String targetCat = category.trim();
+        String targetBu = businessUnit != null ? businessUnit.trim() : "";
+
+        for (MaterialTypeMap existing : mtypes.findAll()) {
+            if (existing.getSapCode() == null || existing.getCategory() == null) continue;
+            if (id != null && id.equals(existing.getId())) continue;
+
+            if (!existing.getSapCode().trim().equalsIgnoreCase(targetCode)) continue;
+            if (!existing.getCategory().trim().equalsIgnoreCase(targetCat)) continue;
+
+            String existingBu = existing.getBusinessUnit() != null ? existing.getBusinessUnit().trim() : "";
+            if (existingBu.equalsIgnoreCase(targetBu)) {
+                throw new com.unichem.inventory.web.DuplicateMaterialTypeMappingException(
+                        "Duplicate entry found: The combination of Material Type, Dashboard Category, and Business Unit must be unique.");
+            }
+        }
+    }
+
+    public void validateNoDuplicateMaterialTypeMapping(String currentSapCode, String category, String businessUnit, boolean isUpdate) {
+        validateNoDuplicateMaterialTypeMapping(null, currentSapCode, category, businessUnit);
+    }
+
+    public void validateNoDuplicateMaterialTypeMapping(String currentSapCode, String category, String businessUnit) {
+        validateNoDuplicateMaterialTypeMapping(null, currentSapCode, category, businessUnit);
+    }
+
+    @Transactional
+    public List<MaterialTypeMap> saveAllMtypes(List<MaterialTypeMap> list) {
+        if (list == null || list.isEmpty()) return List.of();
+
+        // 1. Check in-batch duplicate composite (materialType + dashboardCategory + businessUnit) combinations
+        Set<String> seenCombos = new HashSet<>();
+        for (MaterialTypeMap m : list) {
+            String code = m.getSapCode() != null ? m.getSapCode().trim().toLowerCase() : "";
+            String cat = m.getCategory() != null ? m.getCategory().trim().toLowerCase() : "";
+            String bu = m.getBusinessUnit() != null ? m.getBusinessUnit().trim().toLowerCase() : "";
+            if (!code.isEmpty() && !cat.isEmpty()) {
+                String key = code + "|" + cat + "|" + bu;
+                if (!seenCombos.add(key)) {
+                    throw new com.unichem.inventory.web.DuplicateMaterialTypeMappingException(
+                            "Duplicate entry found: The combination of Material Type, Dashboard Category, and Business Unit must be unique.");
+                }
+            }
+        }
+
+        // 2. Save each: check by ID or composite key (material_type + category + business_unit)
+        List<MaterialTypeMap> saved = new ArrayList<>();
+        for (MaterialTypeMap m : list) {
+            boolean isExisting = (m.getId() != null && mtypes.findById(m.getId()).isPresent())
+                    || (m.getSapCode() != null && m.getCategory() != null && mtypes.findByCompositeKey(m.getSapCode().trim(), m.getCategory().trim(), m.getBusinessUnit() != null ? m.getBusinessUnit().trim() : null).isPresent());
+            saved.add(saveMtype(m, isExisting));
+        }
+        return saved;
+    }
+
+    @Transactional
+    public void deleteMtype(String identifier) {
+        if (identifier == null || identifier.isBlank()) return;
+        String trimmed = identifier.trim();
+        try {
+            Long id = Long.parseLong(trimmed);
+            if (mtypes.existsById(id)) {
+                mtypes.deleteById(id);
+                audit.log("Master deleted", "Material type id " + id);
+                return;
+            }
+        } catch (NumberFormatException ignored) {}
+
+        List<MaterialTypeMap> list = mtypes.findAllBySapCodeIgnoreCase(trimmed);
+        if (!list.isEmpty()) {
+            mtypes.deleteAll(list);
+            audit.log("Master deleted", "Material type " + trimmed);
+        }
+    }
 
     @Transactional public MaterialGroupMap saveMgroup(MaterialGroupMap m) {
         if (m.getCategory() != null && m.getCategory().isBlank()) m.setCategory(null);
