@@ -8,6 +8,7 @@ import java.util.*;
 public interface PlantRepository extends JpaRepository<Plant, Long> {
     Optional<Plant> findByName(String name);
     Optional<Plant> findBySapCode(String sapCode);
+    List<Plant> findByActiveTrue();
     List<Plant> findAllByOrderBySortOrderAscNameAsc();
     List<Plant> findByActiveTrueOrderBySortOrderAscNameAsc();
     @Query("SELECT p FROM Plant p WHERE p.active = true ORDER BY p.sortOrder ASC, p.name ASC")

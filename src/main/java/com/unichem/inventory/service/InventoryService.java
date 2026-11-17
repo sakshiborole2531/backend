@@ -62,9 +62,10 @@ public class InventoryService {
         Set<String> visible = current.visiblePlants();
         Set<String> inactive = current.inactivePlants();
         Set<String> allowed = current.allowedPlants();
+        MasterLookup.Ctx ctx = lookup.ctx();
         return repo.findAll().stream()
                 .filter(i -> visible.contains(i.getPlant()) || (!inactive.contains(i.getPlant()) && allowed == null))
-                .map(i -> calc.calc(i, t))
+                .map(i -> calc.calc(i, t, ctx))
                 .filter(x -> f == null || f.test(x))
                 .toList();
     }

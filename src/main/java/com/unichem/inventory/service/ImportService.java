@@ -9,14 +9,25 @@ import com.unichem.inventory.repo.ActionItemRepository;
 import com.unichem.inventory.repo.InventoryItemRepository;
 import com.unichem.inventory.repo.SyncLogRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.poi.openxml4j.opc.OPCPackage;
+import org.apache.poi.openxml4j.util.ZipSecureFile;
 import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.util.XMLHelper;
+import org.apache.poi.xssf.eventusermodel.ReadOnlySharedStringsTable;
+import org.apache.poi.xssf.eventusermodel.XSSFReader;
+import org.apache.poi.xssf.eventusermodel.XSSFSheetXMLHandler;
+import org.apache.poi.xssf.model.StylesTable;
+import org.apache.poi.xssf.usermodel.XSSFComment;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import org.xml.sax.ContentHandler;
+import org.xml.sax.InputSource;
+import org.xml.sax.XMLReader;
 
-import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
@@ -29,7 +40,10 @@ import static com.unichem.inventory.domain.Constants.*;
 /** Inventory import from the Unichem SAP stock report (22 columns) or the app template: preview → validate → commit. */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ImportService {
+    public static final int IMPORT_TIMEOUT_SECONDS = 120;
+
     private final InventoryItemRepository repo;
     private final ActionItemRepository actions;
     private final SyncLogRepository syncLog;
@@ -77,36 +91,177 @@ public class ImportService {
 
     // ------------------------------------------------------------------ reading
     public List<Map<String, String>> read(MultipartFile file) throws Exception {
-        String n = Objects.requireNonNullElse(file.getOriginalFilename(), "").toLowerCase();
-        return readStream(file.getInputStream(), n);
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("Uploaded file is empty or missing");
+        }
+        String n = Objects.requireNonNullElse(file.getOriginalFilename(), "").toLowerCase(Locale.ROOT);
+        return readBytes(file.getBytes(), n);
     }
 
     public List<Map<String, String>> readBytes(byte[] bytes, String fileName) throws Exception {
-        String n = Objects.requireNonNullElse(fileName, "").toLowerCase();
-        try (InputStream in = new java.io.ByteArrayInputStream(bytes)) {
-            return readStream(in, n);
+        if (bytes == null || bytes.length == 0) {
+            throw new IllegalArgumentException("Uploaded file is empty (0 bytes)");
+        }
+        String n = Objects.requireNonNullElse(fileName, "").toLowerCase(Locale.ROOT);
+        try (InputStream in = new ByteArrayInputStream(bytes)) {
+            return readStream(in, bytes, n);
         }
     }
 
-    private List<Map<String, String>> readStream(InputStream in, String lowerName) throws Exception {
-        List<List<String>> aoa = lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls") || lowerName.endsWith(".xlsm") ? readExcel(in) : readCsv(in);
+    private List<Map<String, String>> readStream(InputStream in, byte[] rawBytes, String lowerName) throws Exception {
+        boolean isExcel = lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls") || lowerName.endsWith(".xlsm");
+        List<List<String>> aoa;
+        if (isExcel) {
+            aoa = readExcel(in, rawBytes, lowerName);
+        } else {
+            aoa = readCsv(in);
+        }
         int h = 0;
-        for (int i = 0; i < Math.min(10, aoa.size()); i++) if (aoa.get(i).stream().filter(v -> !v.isBlank()).count() >= 2) { h = i; break; }
+        for (int i = 0; i < Math.min(10, aoa.size()); i++) {
+            if (aoa.get(i).stream().filter(v -> v != null && !v.isBlank()).count() >= 2) {
+                h = i;
+                break;
+            }
+        }
         if (aoa.isEmpty()) return List.of();
-        List<String> header = aoa.get(h).stream().map(String::trim).toList();
-        List<Map<String, String>> rows = new ArrayList<>();
+        List<String> header = aoa.get(h).stream().map(v -> v == null ? "" : v.trim()).toList();
+        List<Map<String, String>> rows = new ArrayList<>(Math.max(0, aoa.size() - h - 1));
         for (int i = h + 1; i < aoa.size(); i++) {
             List<String> r = aoa.get(i);
-            if (r.stream().allMatch(String::isBlank)) continue;
-            Map<String, String> o = new LinkedHashMap<>();
-            for (int c = 0; c < header.size(); c++) if (!header.get(c).isEmpty()) o.put(header.get(c), c < r.size() ? r.get(c) : "");
+            if (r == null || r.stream().allMatch(v -> v == null || v.isBlank())) continue;
+            Map<String, String> o = new LinkedHashMap<>(header.size() * 2);
+            for (int c = 0; c < header.size(); c++) {
+                String colName = header.get(c);
+                if (!colName.isEmpty()) {
+                    o.put(colName, c < r.size() && r.get(c) != null ? r.get(c) : "");
+                }
+            }
             rows.add(o);
         }
         return rows;
     }
 
-    private List<List<String>> readExcel(InputStream in) throws Exception {
+    private List<List<String>> readExcel(InputStream in, byte[] rawBytes, String lowerName) throws Exception {
+        ZipSecureFile.setMinInflateRatio(0.0001);
+        if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xlsm")) {
+            try {
+                return readXlsxStreaming(rawBytes != null ? new ByteArrayInputStream(rawBytes) : in);
+            } catch (Exception streamEx) {
+                log.debug("Streaming XLSX parser fallback for {}: {}", lowerName, streamEx.getMessage());
+                if (rawBytes != null) {
+                    try {
+                        return readExcelWorkbook(new ByteArrayInputStream(rawBytes));
+                    } catch (Exception wbEx) {
+                        throw new IllegalArgumentException("Invalid or corrupted Excel file '" + lowerName + "': " + wbEx.getMessage(), wbEx);
+                    }
+                }
+                throw new IllegalArgumentException("Invalid or corrupted Excel file '" + lowerName + "': " + streamEx.getMessage(), streamEx);
+            }
+        }
+        try {
+            return readExcelWorkbook(rawBytes != null ? new ByteArrayInputStream(rawBytes) : in);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid or corrupted Excel file '" + lowerName + "': " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Memory-efficient streaming SAX parser for large .xlsx/.xlsm files (e.g., 40,000+ SAP rows).
+     * Avoids loading the full XML DOM (XSSFWorkbook) into heap memory.
+     */
+    private List<List<String>> readXlsxStreaming(InputStream in) throws Exception {
+        try (OPCPackage pkg = OPCPackage.open(in)) {
+            ReadOnlySharedStringsTable strings = new ReadOnlySharedStringsTable(pkg, false);
+            XSSFReader xssfReader = new XSSFReader(pkg);
+            StylesTable styles = xssfReader.getStylesTable();
+            XSSFReader.SheetIterator iter = (XSSFReader.SheetIterator) xssfReader.getSheetsData();
+
+            byte[] fallbackFirstSheet = null;
+            byte[] targetSheetBytes = null;
+            while (iter.hasNext()) {
+                try (InputStream sheetIn = iter.next()) {
+                    String sheetName = iter.getSheetName();
+                    byte[] sheetBytes = sheetIn.readAllBytes();
+                    if (fallbackFirstSheet == null) {
+                        fallbackFirstSheet = sheetBytes;
+                    }
+                    if (sheetName != null && sheetName.matches("(?i)sap stock|inventory|template|data|sheet1|summary")) {
+                        targetSheetBytes = sheetBytes;
+                        break;
+                    }
+                }
+            }
+
+            byte[] chosen = targetSheetBytes != null ? targetSheetBytes : fallbackFirstSheet;
+            if (chosen == null) return List.of();
+
+            List<List<String>> out = new ArrayList<>(4096);
+            DataFormatter fmt = new DataFormatter() {
+                @Override
+                public String formatRawCellContents(double value, int formatIndex, String formatString, boolean use1904Windowing) {
+                    if (DateUtil.isADateFormat(formatIndex, formatString) && DateUtil.isValidExcelDate(value)) {
+                        Date d = DateUtil.getJavaDate(value, use1904Windowing);
+                        if (d != null) {
+                            return d.toInstant().atZone(ZoneId.systemDefault()).toLocalDate().toString();
+                        }
+                    }
+                    return BigDecimal.valueOf(value).stripTrailingZeros().toPlainString();
+                }
+            };
+
+            XSSFSheetXMLHandler.SheetContentsHandler sheetHandler = new XSSFSheetXMLHandler.SheetContentsHandler() {
+                private List<String> currentRow = new ArrayList<>(24);
+
+                @Override
+                public void startRow(int rowNum) {
+                    currentRow = new ArrayList<>(24);
+                }
+
+                @Override
+                public void endRow(int rowNum) {
+                    out.add(currentRow);
+                }
+
+                @Override
+                public void cell(String cellReference, String formattedValue, XSSFComment comment) {
+                    int colIdx = columnIndex(cellReference, currentRow.size());
+                    while (currentRow.size() < colIdx) {
+                        currentRow.add("");
+                    }
+                    currentRow.add(formattedValue != null ? formattedValue : "");
+                }
+            };
+
+            XMLReader parser = XMLHelper.newXMLReader();
+            ContentHandler handler = new XSSFSheetXMLHandler(styles, null, strings, sheetHandler, fmt, false);
+            parser.setContentHandler(handler);
+            try (InputStream sheetStream = new ByteArrayInputStream(chosen)) {
+                parser.parse(new InputSource(sheetStream));
+            }
+            return out;
+        }
+    }
+
+    private static int columnIndex(String cellReference, int fallbackCol) {
+        if (cellReference == null || cellReference.isEmpty()) return fallbackCol;
+        int col = 0;
+        int len = cellReference.length();
+        for (int i = 0; i < len; i++) {
+            char ch = cellReference.charAt(i);
+            if (ch >= 'A' && ch <= 'Z') {
+                col = col * 26 + (ch - 'A' + 1);
+            } else if (ch >= 'a' && ch <= 'z') {
+                col = col * 26 + (ch - 'a' + 1);
+            } else {
+                break;
+            }
+        }
+        return col > 0 ? col - 1 : fallbackCol;
+    }
+
+    private List<List<String>> readExcelWorkbook(InputStream in) throws Exception {
         try (Workbook wb = WorkbookFactory.create(in)) {
+            if (wb.getNumberOfSheets() == 0) return List.of();
             Sheet sh = null;
             for (int i = 0; i < wb.getNumberOfSheets(); i++)
                 if (wb.getSheetName(i).matches("(?i)sap stock|inventory|template|data|sheet1|summary")) { sh = wb.getSheetAt(i); break; }
@@ -131,7 +286,7 @@ public class ImportService {
     }
 
     private List<List<String>> readCsv(InputStream in) throws Exception {
-        String text = new String(in.readAllBytes(), StandardCharsets.UTF_8).replace("﻿", "");
+        String text = new String(in.readAllBytes(), StandardCharsets.UTF_8).replace("\uFEFF", "");
         String first = text.lines().findFirst().orElse("");
         long tabs = first.chars().filter(ch -> ch == '\t').count(), semis = first.chars().filter(ch -> ch == ';').count(), commas = first.chars().filter(ch -> ch == ',').count();
         char delim = tabs > commas && tabs >= semis ? '\t' : semis > commas ? ';' : ',';
@@ -151,28 +306,36 @@ public class ImportService {
     // ------------------------------------------------------------------ mapping
     record Built(InventoryItem rec, List<String> errs, List<String> warns, int src, boolean excluded) {}
 
-    private List<Built> map(List<Map<String, String>> rows, boolean sap, List<String> missing) {
-        return map(rows, sap, missing, current.allowedPlants(), false);
+    private List<Built> map(List<Map<String, String>> rows, boolean sap, List<String> missing, MasterLookup.Ctx ctx) {
+        return map(rows, sap, missing, current.allowedPlants(), false, ctx);
     }
 
-    private List<Built> map(List<Map<String, String>> rows, boolean sap, List<String> missing, Set<String> allowedScope, boolean strictMasterPlant) {
+    private List<Built> map(List<Map<String, String>> rows, boolean sap, List<String> missing, Set<String> allowedScope, boolean strictMasterPlant, MasterLookup.Ctx ctx) {
         Map<String, List<String>> M = sap ? SAPSTOCK : APP;
-        Set<String> keys = new LinkedHashSet<>(); rows.forEach(r -> keys.addAll(r.keySet()));
-        Map<String, String> hidx = new HashMap<>(); keys.forEach(k -> hidx.put(Parsing.norm(k), k));
+        Set<String> keys = new LinkedHashSet<>();
+        if (!rows.isEmpty()) {
+            keys.addAll(rows.get(0).keySet());
+        }
+        Map<String, String> hidx = new HashMap<>();
+        keys.forEach(k -> hidx.put(Parsing.norm(k), k));
         Map<String, String> col = new HashMap<>();
         M.forEach((f, names) -> names.stream().map(n -> hidx.get(Parsing.norm(n))).filter(Objects::nonNull).findFirst().ifPresentOrElse(k -> col.put(f, k), () -> missing.add(f)));
         Map<String, List<String>> sum = new HashMap<>();
         if (sap) SAPSTOCK_SUM.forEach((f, names) -> { List<String> ks = names.stream().map(n -> hidx.get(Parsing.norm(n))).filter(Objects::nonNull).toList(); if (!ks.isEmpty()) sum.put(f, ks); });
-        MasterLookup.Ctx ctx = lookup.ctx();
-        List<Built> out = new ArrayList<>();
+        MasterLookup.Ctx activeCtx = ctx != null ? ctx : lookup.ctx();
+        List<Built> out = new ArrayList<>(rows.size());
         int i = 1;
         for (Map<String, String> r : rows) {
             i++;
-            Map<String, String> raw = new HashMap<>();
+            Map<String, String> raw = new HashMap<>(col.size() * 2);
             col.forEach((f, k) -> raw.put(f, r.getOrDefault(k, "")));
-            Map<String, Double> sums = new HashMap<>();
-            sum.forEach((f, ks) -> sums.put(f, ks.stream().mapToDouble(k -> Parsing.num(r.get(k))).sum()));
-            out.add(build(raw, sums, ctx, i, allowedScope, strictMasterPlant));
+            Map<String, Double> sums = new HashMap<>(sum.size() * 2);
+            sum.forEach((f, ks) -> {
+                double total = 0.0;
+                for (String k : ks) total += Parsing.num(r.get(k));
+                sums.put(f, total);
+            });
+            out.add(build(raw, sums, activeCtx, i, allowedScope, strictMasterPlant));
         }
         return out;
     }
@@ -196,19 +359,39 @@ public class ImportService {
         Optional<MaterialTypeMap> mt = ctx.mtype(mtv, bu);
         String cat = mt.map(MaterialTypeMap::getCategory).filter(MAT_TYPES::contains).orElse(mt.isPresent() ? "" : MasterLookup.catFromText(mtv));
         Optional<MaterialGroupMap> mg = ctx.mgroup(s.apply("matGroup"));
-        if (mt.isPresent() && "Exclude".equals(mt.get().getCategory())) { errs.add("Excluded: material type " + mtv + " is not tracked as inventory"); excluded = true; }
-        else if (mt.isEmpty() && cat.isEmpty() && mg.isPresent() && "Exclude".equals(mg.get().getCategory())) { errs.add("Excluded: material group " + mg.get().getSapCode() + " is not tracked as inventory"); excluded = true; }
+        if (mt.isPresent() && "Exclude".equalsIgnoreCase(mt.get().getCategory())) { errs.add("Excluded: material type " + mtv + " is not tracked as inventory"); excluded = true; }
+        else if (mt.isEmpty() && cat.isEmpty() && mg.isPresent() && "Exclude".equalsIgnoreCase(mg.get().getCategory())) { errs.add("Excluded: material group " + mg.get().getSapCode() + " is not tracked as inventory"); excluded = true; }
         if (cat.isEmpty() && mg.isPresent() && mg.get().getCategory() != null && MAT_TYPES.contains(mg.get().getCategory())) cat = mg.get().getCategory();
         if (cat.isEmpty() && mg.isPresent() && mg.get().getDepartment() != null) cat = "Consumable";
-        if (cat.isEmpty()) { if (!excluded) warns.add(mtv.isEmpty() ? "Category missing — set to Raw Material" : "Category \"" + mtv + "\" not mapped — set to Raw Material"); cat = "Raw Material"; }
+
+        String code = s.apply("code"), name = s.apply("name");
+        String effectiveBu = bu.isEmpty() ? "API" : bu;
+
+        // Resolve dynamic BU-specific category (e.g. 100* is RM for Formulation, FG for API) before department mapping
+        if (!excluded && !code.isEmpty()) {
+            String resolvedCat = ctx.resolveCategory(code, effectiveBu, cat);
+            if ("Exclude".equalsIgnoreCase(resolvedCat)) {
+                errs.add("Excluded: material series for " + code + " is not tracked as inventory");
+                excluded = true;
+            } else if (resolvedCat != null && !resolvedCat.isBlank() && MAT_TYPES.contains(resolvedCat)) {
+                cat = resolvedCat;
+            }
+        }
+
+        if (cat.isEmpty() || !MAT_TYPES.contains(cat)) {
+            if (!excluded) warns.add(mtv.isEmpty() ? "Category missing — set to Raw Material" : "Category \"" + mtv + "\" not mapped — set to Raw Material");
+            cat = "Raw Material";
+        }
+
         String dept = null, sub = s.apply("subCat");
         if ("Consumable".equals(cat)) {
             dept = MasterLookup.dept(s.apply("dept"));
-            if (dept.isEmpty() && mg.isPresent() && mg.get().getDepartment() != null) dept = mg.get().getDepartment();
-            if (dept.isEmpty() && mt.isPresent() && mt.get().getDepartment() != null) dept = mt.get().getDepartment();
-            if (dept.isEmpty()) dept = "Other";
+            if (dept.isEmpty() && mg.isPresent() && mg.get().getDepartment() != null) dept = MasterLookup.dept(mg.get().getDepartment());
+            if (dept.isEmpty() && mt.isPresent() && mt.get().getDepartment() != null) dept = MasterLookup.dept(mt.get().getDepartment());
+            if (dept.isEmpty() || !DEPTS.contains(dept)) dept = "Other";
             if (sub.isEmpty() && mg.isPresent()) sub = Objects.requireNonNullElse(mg.get().getSubCategory(), Objects.requireNonNullElse(mg.get().getDescription(), ""));
         }
+
         String lv = s.apply("storageLoc");
         Optional<StorageLocation> lm = ctx.sloc(lv, plant);
         if (!lv.isEmpty() && lm.isEmpty()) warns.add("Storage location \"" + lv + "\" not in master");
@@ -219,7 +402,7 @@ public class ImportService {
         double cost = Parsing.num(raw.get("unitCost"));
         if (cost == 0 && sums.containsKey("totalValue") && u + q + b > 0) cost = sums.get("totalValue") / (u + q + b);
         if (cost == 0) warns.add("No unit cost / value — value will show as ₹0");
-        Map<String, LocalDate> dates = new HashMap<>();
+        Map<String, LocalDate> dates = new HashMap<>(8);
         for (String f : List.of("receiptDate", "lyingSince", "mfgDate", "expiryDate", "lastIssueDate")) {
             try { dates.put(f, Parsing.date(raw.get(f))); } catch (IllegalArgumentException e) {
                 if (strictMasterPlant) errs.add(e.getMessage());
@@ -231,58 +414,93 @@ public class ImportService {
         if (dates.get("mfgDate") != null && dates.get("expiryDate") != null && dates.get("expiryDate").isBefore(dates.get("mfgDate"))) warns.add("SLED/BBD is before Date of Manufacture");
         if (dates.get("lastIssueDate") != null && dates.get("receiptDate") != null && dates.get("lastIssueDate").isBefore(dates.get("receiptDate"))) dates.put("lastIssueDate", null);
         if (SHELF_TYPES.contains(cat) && dates.get("expiryDate") == null && !excluded) warns.add("No SLED/BBD — expiry cannot be monitored");
-        String code = s.apply("code"), name = s.apply("name");
         if (code.isEmpty()) errs.add("Material code missing");
         if (name.isEmpty()) { name = code; if (!code.isEmpty()) warns.add("Description missing — code used"); }
         if (!plant.isEmpty() && allowedScope != null && !allowedScope.contains(plant)) errs.add("Plant \"" + plant + "\" outside your data access");
 
         InventoryItem it = new InventoryItem();
-        it.setBuCode(bu.isEmpty() ? "API" : bu); it.setPlant(plant); it.setMatType(cat); it.setDepartment(dept);
-        it.setSubCategory(sub.isEmpty() ? null : sub); it.setCode(code); it.setName(name.length() > 200 ? name.substring(0, 200) : name);
-        it.setBatch(s.apply("batch")); it.setUom(s.apply("uom").isEmpty() ? null : s.apply("uom"));
-        it.setStorageLoc(lm.map(StorageLocation::getName).orElse(lv.isEmpty() ? null : lv));
-        it.setUnrestrictedQty(bd(Math.max(0, u), 3)); it.setQualityQty(bd(Math.max(0, q), 3)); it.setBlockedQty(bd(Math.max(0, b), 3)); it.setUnitCost(bd(Math.max(0, cost), 4));
-        it.setReceiptDate(dates.get("receiptDate")); it.setLyingSince(dates.get("lyingSince")); it.setMfgDate(dates.get("mfgDate"));
-        it.setExpiryDate(dates.get("expiryDate")); it.setLastIssueDate(dates.get("lastIssueDate"));
+        it.setBuCode(trunc(effectiveBu, 40));
+        it.setPlant(trunc(plant, 80));
+        it.setMatType(trunc(cat, 40));
+        it.setDepartment(trunc(dept, 20));
+        it.setSubCategory(sub.isEmpty() ? null : trunc(sub, 120));
+        it.setCode(trunc(code, 40));
+        it.setName(trunc(name, 200));
+        it.setBatch(trunc(s.apply("batch"), 40));
+        it.setUom(s.apply("uom").isEmpty() ? null : trunc(s.apply("uom"), 10));
+        String resolvedLoc = lm.map(StorageLocation::getName).orElse(lv.isEmpty() ? null : lv);
+        it.setStorageLoc(trunc(resolvedLoc, 80));
+        it.setUnrestrictedQty(bd(Math.max(0, u), 3));
+        it.setQualityQty(bd(Math.max(0, q), 3));
+        it.setBlockedQty(bd(Math.max(0, b), 3));
+        it.setUnitCost(bd(Math.max(0, cost), 4));
+        it.setReceiptDate(dates.get("receiptDate"));
+        it.setLyingSince(dates.get("lyingSince"));
+        it.setMfgDate(dates.get("mfgDate"));
+        it.setExpiryDate(dates.get("expiryDate"));
+        it.setLastIssueDate(dates.get("lastIssueDate"));
         String dt = s.apply("dateType");
-        it.setDateType(dt.toLowerCase().contains("retest") || (dt.isEmpty() && (cat.equals("Raw Material") || cat.equals("Intermediate"))) ? "Retest" : "Expiry");
-        it.setBlockReason(s.apply("blockReason").isEmpty() ? null : s.apply("blockReason"));
+        it.setDateType(dt.toLowerCase(Locale.ROOT).contains("retest") || (dt.isEmpty() && (cat.equals("Raw Material") || cat.equals("Intermediate"))) ? "Retest" : "Expiry");
+        it.setBlockReason(s.apply("blockReason").isEmpty() ? null : trunc(s.apply("blockReason"), 200));
         List<String> rem = new ArrayList<>();
         if (!s.apply("remarks").isEmpty()) rem.add(s.apply("remarks"));
         if (sums.getOrDefault("transitQty", 0.0) != 0 || sums.getOrDefault("transitValue", 0.0) != 0)
             rem.add("In transit: " + sums.getOrDefault("transitQty", 0.0) + " · ₹" + Math.round(sums.getOrDefault("transitValue", 0.0)));
-        it.setRemarks(rem.isEmpty() ? null : String.join(" · ", rem));
+        it.setRemarks(rem.isEmpty() ? null : trunc(String.join(" · ", rem), 500));
         return new Built(it, errs, warns, src, excluded);
     }
 
-    private static BigDecimal bd(double v, int scale) { return BigDecimal.valueOf(v).setScale(scale, RoundingMode.HALF_UP); }
+    private static String trunc(String s, int max) {
+        if (s == null) return null;
+        return s.length() > max ? s.substring(0, max) : s;
+    }
+
+    private static BigDecimal bd(double v, int scale) {
+        if (Double.isNaN(v) || Double.isInfinite(v)) return BigDecimal.ZERO.setScale(scale, RoundingMode.HALF_UP);
+        return BigDecimal.valueOf(v).setScale(scale, RoundingMode.HALF_UP);
+    }
 
     // ------------------------------------------------------------------ preview / commit
-    @Transactional
+    @Transactional(timeout = IMPORT_TIMEOUT_SECONDS, rollbackFor = Exception.class)
     public ImportResult run(MultipartFile file, String format, String mode, LocalDate asOf, boolean commit) throws Exception {
-        List<Map<String, String>> rows = read(file);
-        if (rows.isEmpty()) throw new IllegalArgumentException("No data rows found");
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("Uploaded file is empty or missing");
+        }
+        return runBytes(file.getBytes(), file.getOriginalFilename(), format, mode, asOf, commit);
+    }
+
+    @Transactional(timeout = IMPORT_TIMEOUT_SECONDS, rollbackFor = Exception.class)
+    public ImportResult runBytes(byte[] fileBytes, String originalFilename, String format, String mode, LocalDate asOf, boolean commit) throws Exception {
+        String safeFileName = (originalFilename == null || originalFilename.isBlank()) ? "Inventory_Import.xlsx" : originalFilename;
+        List<Map<String, String>> rows = readBytes(fileBytes, safeFileName);
+        if (rows.isEmpty()) throw new IllegalArgumentException("No data rows found in '" + safeFileName + "'");
         boolean sap = switch (format == null ? "AUTO" : format) {
             case "SAPSTOCK" -> true; case "APP" -> false;
             default -> rows.get(0).keySet().stream().anyMatch(k -> Parsing.norm(k).equals("unrestricted"));
         };
+        String effectiveMode = (mode == null || mode.isBlank()) ? "upsert" : mode;
+        if ("history".equals(effectiveMode) && asOf == null) throw new IllegalArgumentException("Enter the 'As of' date for the historical snapshot");
+
+        MasterLookup.Ctx ctx = lookup.ctx();
         List<String> missing = new ArrayList<>();
-        List<Built> built = map(rows, sap, missing);
-        if ("history".equals(mode) && asOf == null) throw new IllegalArgumentException("Enter the 'As of' date for the historical snapshot");
+        List<Built> built = map(rows, sap, missing, ctx);
         List<Built> ok = built.stream().filter(b -> b.errs().isEmpty()).toList();
         // duplicates within the file: keep the last occurrence
-        Map<String, Built> uniq = new LinkedHashMap<>();
+        Map<String, Built> uniq = new LinkedHashMap<>(Math.max(16, ok.size() * 2));
         ok.forEach(b -> uniq.put(b.rec().itemKey(), b));
-        Set<String> existing = new HashSet<>();
-        repo.findAll().forEach(i -> existing.add(i.itemKey()));
-        int updates = "upsert".equals(mode) ? (int) uniq.keySet().stream().filter(existing::contains).count() : 0;
+
+        Map<String, InventoryItem> existingIdx = new HashMap<>();
+        if (!"history".equals(effectiveMode) && (!"replace".equals(effectiveMode) || !commit)) {
+            repo.findAll().forEach(i -> existingIdx.put(i.itemKey(), i));
+        }
+        int updates = "upsert".equals(effectiveMode) ? (int) uniq.keySet().stream().filter(existingIdx::containsKey).count() : 0;
         Thresholds t = settings.thresholds();
-        double value = uniq.values().stream().mapToDouble(b -> calc.calc(b.rec(), t).value()).sum();
+        double value = uniq.values().stream().mapToDouble(b -> calc.calc(b.rec(), t, ctx).value()).sum();
         int added = 0, updated = 0;
         if (commit) {
-            switch (mode == null ? "upsert" : mode) {
+            switch (effectiveMode) {
                 case "history" -> {
-                    List<CalcItem> list = uniq.values().stream().map(b -> calc.calc(b.rec(), t, asOf)).toList();
+                    List<CalcItem> list = uniq.values().stream().map(b -> calc.calc(b.rec(), t, asOf, ctx)).toList();
                     snapshots.take("import", asOf, list);
                     added = list.size();
                 }
@@ -294,28 +512,26 @@ public class ImportService {
                     added = uniq.size();
                 }
                 case "add" -> {
-                    List<InventoryItem> fresh = uniq.values().stream().map(Built::rec).filter(r -> !existing.contains(r.itemKey())).toList();
+                    List<InventoryItem> fresh = uniq.values().stream().map(Built::rec).filter(r -> !existingIdx.containsKey(r.itemKey())).toList();
                     repo.saveAll(fresh); added = fresh.size();
                 }
                 default -> {
-                    Map<String, InventoryItem> idx = new HashMap<>();
-                    repo.findAll().forEach(i -> idx.put(i.itemKey(), i));
-                    List<InventoryItem> save = new ArrayList<>();
+                    List<InventoryItem> save = new ArrayList<>(uniq.size());
                     for (Built b : uniq.values()) {
-                        InventoryItem cur = idx.get(b.rec().itemKey());
+                        InventoryItem cur = existingIdx.get(b.rec().itemKey());
                         if (cur != null) { copy(b.rec(), cur); save.add(cur); updated++; } else { save.add(b.rec()); added++; }
                     }
                     repo.saveAll(save);
                 }
             }
             SyncLog l = new SyncLog();
-            l.setSource(("history".equals(mode) ? "Historical snapshot (" : "File import (") + file.getOriginalFilename() + ")");
+            l.setSource(trunc(("history".equals(effectiveMode) ? "Historical snapshot (" : "File import (") + safeFileName + ")", 200));
             l.setRecords(uniq.size()); l.setStatus("OK");
-            l.setMessage(added + " added · " + updated + " updated · " + (built.size() - ok.size()) + " skipped");
+            l.setMessage(trunc(added + " added · " + updated + " updated · " + (built.size() - ok.size()) + " skipped", 1000));
             syncLog.save(l);
             settings.update(Map.of("sync.source", l.getSource(), "sync.lastRefresh", java.time.OffsetDateTime.now().toString()), current.require().getUsername());
-            if (!"history".equals(mode)) snapshots.take("auto", null, null);
-            audit.log("Imported inventory", file.getOriginalFilename() + " · " + mode + " · " + added + " added, " + updated + " updated", "inventory", null, null);
+            if (!"history".equals(effectiveMode)) snapshots.take("auto", null, null);
+            audit.log("Imported inventory", safeFileName + " · " + effectiveMode + " · " + added + " added, " + updated + " updated", "inventory", null, null);
         }
         List<ImportRow> preview = built.stream().limit(300).map(b -> {
             InventoryItem r = b.rec();
@@ -326,7 +542,7 @@ public class ImportService {
             String st = !b.errs().isEmpty() ? (b.excluded() ? "Excluded" : "Error") : !b.warns().isEmpty() ? "Warning" : "OK";
             return new ImportRow(b.src(), st, m, b.errs(), b.warns());
         }).toList();
-        return new ImportResult(file.getOriginalFilename(), sap ? "SAPSTOCK" : "APP", mode, rows.size(), uniq.size(),
+        return new ImportResult(safeFileName, sap ? "SAPSTOCK" : "APP", effectiveMode, rows.size(), uniq.size(),
                 (int) ok.stream().filter(b -> !b.warns().isEmpty()).count(), built.size() - ok.size(),
                 commit ? added : uniq.size() - updates, commit ? updated : updates, value, missing, preview, commit);
     }
@@ -336,7 +552,7 @@ public class ImportService {
      * Validates the entire file before replacing inventory within the authorized scope (`REPLACE_IN_SCOPE`).
      * If any non-excluded validation error occurs, throws an IllegalArgumentException before any destructive DB change.
      */
-    @Transactional
+    @Transactional(timeout = IMPORT_TIMEOUT_SECONDS, rollbackFor = Exception.class)
     public ImportResult runAutomatedReplaceInScope(
             byte[] fileBytes,
             String fileName,
@@ -347,8 +563,9 @@ public class ImportService {
         if (rows.isEmpty()) throw new IllegalArgumentException("No data rows found in Excel file '" + fileName + "'");
 
         boolean sap = rows.get(0).keySet().stream().anyMatch(k -> Parsing.norm(k).equals("unrestricted") || Parsing.norm(k).equals("material"));
+        MasterLookup.Ctx ctx = lookup.ctx();
         List<String> missing = new ArrayList<>();
-        List<Built> built = map(rows, sap, missing, allowedPlants, true);
+        List<Built> built = map(rows, sap, missing, allowedPlants, true, ctx);
 
         // Validate required columns: Material Code and Plant must be mapped
         if (missing.contains("code") || missing.contains("plant")) {
@@ -375,11 +592,11 @@ public class ImportService {
         }
 
         // Deduplicate within the file by (plant|code|batch): keep last occurrence
-        Map<String, Built> uniq = new LinkedHashMap<>();
+        Map<String, Built> uniq = new LinkedHashMap<>(Math.max(16, ok.size() * 2));
         ok.forEach(b -> uniq.put(b.rec().itemKey(), b));
 
         Thresholds t = settings.thresholds();
-        double value = uniq.values().stream().mapToDouble(b -> calc.calc(b.rec(), t).value()).sum();
+        double value = uniq.values().stream().mapToDouble(b -> calc.calc(b.rec(), t, ctx).value()).sum();
 
         // Replace only records within the authorized scope
         if (allowedPlants == null) {
@@ -398,13 +615,13 @@ public class ImportService {
         int skipped = built.size() - ok.size();
 
         String actor = (executedBy != null && !executedBy.isBlank()) ? executedBy : current.username().orElse("system");
-        String src = (sourceLabel != null && !sourceLabel.isBlank()) ? sourceLabel : "Auto SAP import (" + fileName + ")";
+        String src = trunc((sourceLabel != null && !sourceLabel.isBlank()) ? sourceLabel : "Auto SAP import (" + fileName + ")", 200);
 
         SyncLog l = new SyncLog();
         l.setSource(src);
         l.setRecords(uniq.size());
         l.setStatus("OK");
-        l.setMessage(added + " added · 0 updated · " + skipped + " skipped");
+        l.setMessage(trunc(added + " added · 0 updated · " + skipped + " skipped", 1000));
         syncLog.save(l);
 
         settings.update(Map.of("sync.source", src, "sync.lastRefresh", java.time.OffsetDateTime.now().toString()), actor);

@@ -3,6 +3,7 @@ package com.unichem.inventory.service;
 import com.unichem.inventory.domain.InventoryItem;
 import com.unichem.inventory.dto.CalcItem;
 import com.unichem.inventory.dto.Thresholds;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -18,6 +19,17 @@ import java.util.List;
  */
 @Service
 public class CalcService {
+
+    private final MasterLookup lookup;
+
+    @Autowired
+    public CalcService(@Autowired(required = false) MasterLookup lookup) {
+        this.lookup = lookup;
+    }
+
+    public CalcService() {
+        this(null);
+    }
 
     public static final String[] BUCKETS = {"0–30", "31–90", "91–180", "181–365", ">365"};
 
@@ -46,9 +58,21 @@ public class CalcService {
 
     private static double d(BigDecimal b) { return b == null ? 0 : b.doubleValue(); }
 
+    public MasterLookup.Ctx lookupCtx() {
+        return lookup != null ? lookup.ctx() : null;
+    }
+
     public CalcItem calc(InventoryItem it, Thresholds t) { return calc(it, t, LocalDate.now()); }
 
+    public CalcItem calc(InventoryItem it, Thresholds t, MasterLookup.Ctx ctx) {
+        return calc(it, t, LocalDate.now(), ctx);
+    }
+
     public CalcItem calc(InventoryItem it, Thresholds t, LocalDate asOf) {
+        return calc(it, t, asOf, lookupCtx());
+    }
+
+    public CalcItem calc(InventoryItem it, Thresholds t, LocalDate asOf, MasterLookup.Ctx ctx) {
         double u = d(it.getUnrestrictedQty()), q = d(it.getQualityQty()), b = d(it.getBlockedQty()), c = d(it.getUnitCost());
         double qty = u + q + b;
         LocalDate lying = it.getLyingSince() != null ? it.getLyingSince() : it.getReceiptDate();
@@ -69,8 +93,17 @@ public class CalcService {
         boolean restricted = q > 0 || b > 0;
         double value = qty * c;
 
+        // Dynamically resolve category based on Number Series + Business Unit if available
+        String resolvedCategory = it.getMatType();
+        if (ctx != null) {
+            String resolved = ctx.resolveCategory(it.getCode(), it.getBuCode(), it.getMatType());
+            if (resolved != null && !resolved.isBlank()) {
+                resolvedCategory = resolved;
+            }
+        }
+
         String consStatus = null;
-        boolean cons = "Consumable".equals(it.getMatType());
+        boolean cons = "Consumable".equals(resolvedCategory);
         if (cons) {
             consStatus = "Non-moving".equals(movement) ? "Non-Moving"
                     : (age != null && age > t.longLyingDays()) ? "Long Lying"
@@ -102,7 +135,7 @@ public class CalcService {
         int score = (int) Math.round(s);
         String prio = s == 0 ? null : s >= 70 ? "P1" : s >= 40 ? "P2" : "P3";
 
-        return new CalcItem(it.getId(), it.getBuCode(), it.getPlant(), it.getMatType(), it.getDepartment(), it.getSubCategory(),
+        return new CalcItem(it.getId(), it.getBuCode(), it.getPlant(), resolvedCategory, it.getDepartment(), it.getSubCategory(),
                 it.getCode(), it.getName(), it.getBatch(), it.getUom(), it.getStorageLoc(), u, q, b, c,
                 it.getReceiptDate(), it.getLyingSince(), it.getMfgDate(), it.getExpiryDate(), it.getDateType(),
                 it.getLastIssueDate(), it.getBlockReason(), it.getRemarks(),

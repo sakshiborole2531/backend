@@ -6,6 +6,7 @@ import org.springframework.data.repository.query.Param;
 import java.util.*;
 
 public interface BusinessUnitRepository extends JpaRepository<BusinessUnit, String> {
+    List<BusinessUnit> findByActiveTrue();
     List<BusinessUnit> findAllByOrderBySortOrderAscCodeAsc();
     List<BusinessUnit> findByActiveTrueOrderBySortOrderAscCodeAsc();
     @Query("SELECT b FROM BusinessUnit b WHERE b.active = true ORDER BY b.sortOrder ASC, b.code ASC")

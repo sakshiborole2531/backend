@@ -6,6 +6,7 @@ import org.springframework.data.repository.query.Param;
 import java.util.*;
 
 public interface MaterialTypeMapRepository extends JpaRepository<MaterialTypeMap, Long> {
+    List<MaterialTypeMap> findByActiveTrue();
     List<MaterialTypeMap> findAllByOrderBySortOrderAscSapCodeAsc();
     List<MaterialTypeMap> findByActiveTrueOrderBySortOrderAscSapCodeAsc();
     @Query("SELECT m FROM MaterialTypeMap m WHERE m.active = true ORDER BY m.sortOrder ASC, m.sapCode ASC")

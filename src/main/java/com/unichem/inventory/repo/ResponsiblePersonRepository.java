@@ -7,4 +7,7 @@ import java.util.*;
 
 public interface ResponsiblePersonRepository extends JpaRepository<ResponsiblePerson, Long> {
     Optional<ResponsiblePerson> findByNameIgnoreCase(String name);
+    List<ResponsiblePerson> findByActiveTrue();
+    List<ResponsiblePerson> findAllByOrderBySortOrderAscNameAsc();
+    List<ResponsiblePerson> findByActiveTrueOrderBySortOrderAscNameAsc();
 }

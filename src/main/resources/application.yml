@@ -21,8 +21,8 @@ spring:
     enabled: true
   servlet:
     multipart:
-      max-file-size: 25MB
-      max-request-size: 25MB
+      max-file-size: 100MB
+      max-request-size: 100MB
 app:
   jwt:
     # 256-bit secret, base64. Override in every real environment: APP_JWT_SECRET

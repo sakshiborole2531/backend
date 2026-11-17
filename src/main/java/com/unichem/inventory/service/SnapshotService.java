@@ -44,7 +44,8 @@ public class SnapshotService {
         if (list == null) {
             List<InventoryItem> all = inventory.findAll();
             if (all.isEmpty()) return false;
-            list = all.stream().map(i -> calc.calc(i, t, d)).toList();
+            MasterLookup.Ctx ctx = calc.lookupCtx();
+            list = all.stream().map(i -> calc.calc(i, t, d, ctx)).toList();
         }
         if (!"sample".equals(source)) repo.findAll().stream().filter(s -> "sample".equals(s.getSource())).forEach(repo::delete);
         ex.ifPresent(s -> { repo.delete(s); repo.flush(); });

@@ -605,4 +605,134 @@ class AutomaticImportTest {
                 .andExpect(jsonPath("$.status").value("SUCCESS"))
                 .andExpect(jsonPath("$.successfulRecords").value(1));
     }
+
+    // 10. Verify /api/inventory/import streaming Excel import, 400 Bad Request on invalid file, and 500 on unexpected error
+    @Test
+    @DisplayName("10. Verify /api/inventory/import endpoint with streaming XLSX, 400 Bad Request, and 500 error handling")
+    void verifyInventoryControllerImportEndpoint() throws Exception {
+        InventoryService invService = mock(InventoryService.class);
+        ExportService expService = mock(ExportService.class);
+        InventoryController invController = new InventoryController(invService, importService, expService);
+        MockMvc invMvc = MockMvcBuilders.standaloneSetup(invController)
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+
+        // a) Valid XLSX import via streaming parser
+        Path file = writeSapExcelFile("Material Inventory 02112026.XLSX", List.of(
+                sapRow("RM-801", "Streaming Material 1", "1710", "RM01", "ZRAW", "B801", "150", "45000", "2026-09-01", "2027-09-01"),
+                sapRow("FG-802", "Streaming Material 2", "1100", "FG01", "ZFIN", "B802", "200", "80000", "2026-09-05", "2027-09-05")
+        ));
+        org.springframework.mock.web.MockMultipartFile validFile = new org.springframework.mock.web.MockMultipartFile(
+                "file", "Material Inventory 02112026.XLSX",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                Files.readAllBytes(file));
+
+        invMvc.perform(multipart("/api/inventory/import")
+                        .file(validFile)
+                        .param("format", "AUTO")
+                        .param("mode", "upsert")
+                        .param("preview", "false"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rowsRead").value(2))
+                .andExpect(jsonPath("$.ready").value(2))
+                .andExpect(jsonPath("$.committed").value(true));
+
+        // b) Corrupted / invalid .xlsx file returns 400 Bad Request instead of hanging
+        org.springframework.mock.web.MockMultipartFile corruptedFile = new org.springframework.mock.web.MockMultipartFile(
+                "file", "corrupted.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "not-a-valid-zip-or-xlsx".getBytes());
+
+        invMvc.perform(multipart("/api/inventory/import")
+                        .file(corruptedFile)
+                        .param("preview", "true"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").isNotEmpty());
+
+        // c) Unexpected NullPointerException in service returns 500 Internal Server Error instead of hanging
+        ImportService failingImporter = mock(ImportService.class);
+        when(failingImporter.runBytes(any(), any(), any(), any(), any(), anyBoolean()))
+                .thenThrow(new NullPointerException("Simulated NPE during import"));
+        InventoryController failingController = new InventoryController(invService, failingImporter, expService);
+        MockMvc failingMvc = MockMvcBuilders.standaloneSetup(failingController)
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+
+        failingMvc.perform(multipart("/api/inventory/import")
+                        .file(validFile)
+                        .param("preview", "false"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.message").value("Simulated NPE during import"));
+    }
+
+    // 11. Verify multi-level BU-wise and Unit-wise reporting endpoints (/api/reports/summary, /api/reports/generate, /api/reports/pdf)
+    @Test
+    @DisplayName("11. Verify /api/reports/summary, /api/reports/generate, and /api/reports/pdf multi-level aggregation and PDF stream")
+    void verifyReportSummaryAndPdfEndpoints() throws Exception {
+        // Import sample records across API (PITHAMPUR-API, KOLHAPUR-API) and Formulation (Baddi-1)
+        Path file = writeSapExcelFile("Report_Seed.xlsx", List.of(
+                sapRow("RM-901", "API Raw Mat 1", "1710", "RM01", "ZRAW", "B901", "100", "50000", "2025-11-01", "2026-12-15"),
+                sapRow("RM-902", "API Raw Mat 2", "1720", "RM01", "ZRAW", "B902", "200", "80000", "2026-09-01", "2027-09-01"),
+                sapRow("FG-903", "Formulation FG 1", "1100", "FG01", "ZFIN", "B903", "300", "120000", "2026-08-01", "2027-08-01")
+        ));
+        automaticImportService.saveConfig(new AutomaticImportConfigRequest(
+                1L, tempDir.toString(), "Report_Seed.xlsx", file.toString(), 24, "REPLACE_IN_SCOPE", true, false, null, null));
+        automaticImportService.runNow(1L, true);
+
+        lenient().when(actionRepo.findAll()).thenAnswer(inv -> new ArrayList<>(actionStore.values()));
+        lenient().when(buRepo.findAllByOrderBySortOrderAscCodeAsc()).thenAnswer(inv -> new ArrayList<>(buStore.values()));
+        lenient().when(plantRepo.findAllByOrderBySortOrderAscNameAsc()).thenAnswer(inv -> new ArrayList<>(plantStore.values()));
+        lenient().when(settingsService.all()).thenReturn(Map.of(
+                "companyName", "Unichem Laboratories Ltd.",
+                "companyShort", "UNICHEM",
+                "sync.source", "SAP Stock"
+        ));
+
+        InventoryService invService = new InventoryService(inventoryRepo, actionRepo, calcService, settingsService, currentUserService, masterLookup, auditService);
+        ActionService actService = new ActionService(actionRepo, inventoryRepo, invService, calcService, settingsService, currentUserService, auditService);
+        AnalyticsService analyticsService = new AnalyticsService(invService, actService, settingsService, plantRepo, buRepo, currentUserService);
+        ExportService exportService = new ExportService(invService, actService, analyticsService, settingsService, auditService);
+        ReportService reportService = new ReportService(invService, actService, settingsService, snapshotService, buRepo, plantRepo, currentUserService, auditService);
+        ReportController reportController = new ReportController(analyticsService, snapshotService, exportService, currentUserService, auditService, reportService);
+
+        MockMvc repMvc = MockMvcBuilders.standaloneSetup(reportController)
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+
+        // a) GET /api/reports/summary
+        repMvc.perform(get("/api/reports/summary")
+                        .param("repType", "both")
+                        .param("bu", "All"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reportType").value("both"))
+                .andExpect(jsonPath("$.totalSummary.agg.n").value(3))
+                .andExpect(jsonPath("$.totalSummary.agg.v").value(250000.0))
+                .andExpect(jsonPath("$.buSummaryRows.length()").value(2))
+                .andExpect(jsonPath("$.unitSummaryRows").isNotEmpty());
+
+        // b) POST /api/reports/generate filtered to API BU
+        ReportFilterRequest postReq = new ReportFilterRequest(
+                "bu", "bu", "API", "API", List.of("API"), null,
+                null, null, null, null,
+                "all", null, null, null, null, null, null,
+                Map.of("summary", true, "status", true), null, 10, "QA Reviewer"
+        );
+        repMvc.perform(post("/api/reports/generate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(postReq)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.selectedBu").value("API"))
+                .andExpect(jsonPath("$.preparedBy").value("QA Reviewer"))
+                .andExpect(jsonPath("$.totalSummary.agg.n").value(2))
+                .andExpect(jsonPath("$.totalSummary.agg.v").value(130000.0))
+                .andExpect(jsonPath("$.totalSummary.ac.open").value(1));
+
+        // c) GET /api/reports/pdf returns valid PDF 1.4 binary stream
+        byte[] pdfBytes = repMvc.perform(get("/api/reports/pdf").param("repType", "both"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", "application/pdf"))
+                .andReturn().getResponse().getContentAsByteArray();
+
+        assertThat(new String(pdfBytes, 0, 8)).startsWith("%PDF-1.4");
+    }
 }

@@ -153,6 +153,62 @@ public final class Dtos {
             boolean active,
             int sortOrder) {}
 
+    public record StorageLocationRequest(
+            Long id,
+            String code,
+            String name,
+            String plantName,
+            String storageType,
+            Boolean active,
+            Integer sortOrder) {}
+
+    public record StorageLocationDto(
+            Long id,
+            String code,
+            String name,
+            String plantName,
+            String storageType,
+            boolean active,
+            int sortOrder) {}
+
+    public record MaterialGroupRequest(
+            String sapCode,
+            String description,
+            String category,
+            String department,
+            String subCategory,
+            Boolean active,
+            Integer sortOrder) {}
+
+    public record MaterialGroupDto(
+            String sapCode,
+            String description,
+            String category,
+            String department,
+            String subCategory,
+            boolean active,
+            int sortOrder) {}
+
+    public record ResponsibleFunctionDto(
+            String name,
+            String v,
+            boolean active,
+            int sortOrder) {}
+
+    public record ActionTypeDto(
+            String name,
+            String v,
+            boolean active,
+            int sortOrder) {}
+
+    public record ResponsiblePersonDto(
+            Long id,
+            String name,
+            String functionName,
+            String email,
+            boolean active,
+            int sortOrder) {}
+
     public record HierarchyPlantDto(Long id, String name, String sapCode, Long businessUnitId, boolean active) {}
 
     public record HierarchyBusinessUnitDto(
@@ -236,4 +292,131 @@ public final class Dtos {
             String errorMessage,
             String executedBy,
             long executionDuration) {}
+
+    // ---------- Multi-level PDF & Live Preview Report DTOs ----------
+    public record ReportFilterRequest(
+            String reportType,
+            String repType,
+            String bu,
+            String selectedBu,
+            List<String> bus,
+            List<String> selectedBus,
+            String plant,
+            List<String> units,
+            List<String> selectedUnits,
+            List<String> plants,
+            String dataScope,
+            String cat,
+            String status,
+            String dept,
+            String loc,
+            String q,
+            Double minValue,
+            Map<String, Boolean> sections,
+            List<String> sectionList,
+            Integer topN,
+            String preparedBy) {}
+
+    public record ReportMetricsDto(
+            int n,
+            int batches,
+            int mats,
+            int materials,
+            double v,
+            double totalValue,
+            double u,
+            double unrestrictedValue,
+            double q,
+            double qualityValue,
+            double b,
+            double blockedValue,
+            double aged,
+            double agedValue,
+            int agedN,
+            int agedBatches,
+            double exp,
+            double expiryValue,
+            int expN,
+            int expiryBatches,
+            double expd,
+            double expiredValue,
+            int expdN,
+            int expiredBatches,
+            double cons,
+            double consumablesValue,
+            int consN,
+            int consumablesBatches,
+            double idle,
+            double idleValue,
+            int idleN,
+            int idleBatches,
+            int exc,
+            int exceptionCount,
+            double excV,
+            double exceptionValue,
+            int p1,
+            int p2,
+            int p3,
+            int openActions,
+            int overdueActions,
+            int totalActions) {}
+
+    public record ReportActionCountsDto(
+            int open,
+            int od,
+            int overdue,
+            int closed,
+            int total) {}
+
+    public record BuSummaryRowDto(
+            String bu,
+            String desc,
+            String description,
+            int unitsCount,
+            ReportMetricsDto agg,
+            ReportActionCountsDto ac) {}
+
+    public record UnitSummaryRowDto(
+            String kind,
+            String bu,
+            String unit,
+            String sap,
+            String sapCode,
+            String city,
+            ReportMetricsDto agg,
+            ReportActionCountsDto ac) {}
+
+    public record ReportTotalSummaryDto(
+            int buCount,
+            int unitsCount,
+            ReportMetricsDto agg,
+            ReportActionCountsDto ac) {}
+
+    public record ReportSummaryResponseDto(
+            String reportType,
+            String selectedBu,
+            List<String> selectedBus,
+            List<String> selectedUnits,
+            String dataScope,
+            String preparedBy,
+            String generatedAt,
+            String companyName,
+            String companyShort,
+            String syncSource,
+            Thresholds thresholds,
+            List<String> activeBus,
+            List<String> activeUnits,
+            Map<String, Boolean> sections,
+            int topN,
+            ReportTotalSummaryDto totalSummary,
+            List<BuSummaryRowDto> buSummaryRows,
+            List<UnitSummaryRowDto> unitSummaryRows,
+            List<Map<String, Object>> byCategory,
+            List<Map<String, Object>> agingBuckets,
+            List<CalcItem> expiryBatches,
+            List<CalcItem> slowMovingBatches,
+            List<Map<String, Object>> consumablesByDept,
+            Map<String, Object> yearwise,
+            List<Map<String, Object>> openActions,
+            List<Map<String, Object>> unitDetails) {}
 }

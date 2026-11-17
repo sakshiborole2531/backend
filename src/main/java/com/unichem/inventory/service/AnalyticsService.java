@@ -116,8 +116,19 @@ public class AnalyticsService {
                     p.getSapCode() == null ? bu : "SAP " + p.getSapCode(), d.stream().filter(x -> p.getName().equals(x.plant())).toList(),
                     acts.stream().filter(a -> p.getName().equals(a.getPlant())).toList(), t)));
         } else {
-            d.stream().map(x -> x.storageLoc() == null ? "Unassigned" : x.storageLoc()).distinct().forEach(l -> kids.add(kid(l, "loc", "Storage location",
-                    d.stream().filter(x -> l.equals(x.storageLoc() == null ? "Unassigned" : x.storageLoc())).toList(), List.of(), t)));
+            // For unit level, compute the full list of storage locations for the plant (without loc filter)
+            // so children list remains complete and available for selection/display
+            List<CalcItem> plantItems = all.stream().filter(x -> {
+                if (!InventoryService.Filter.all(f.bu()) && !f.bu().equals(x.bu())) return false;
+                if (!InventoryService.Filter.all(f.plant()) && !f.plant().equals(x.plant())) return false;
+                if (!InventoryService.Filter.all(f.cat())) {
+                    if ("Goods".equals(f.cat()) ? "Consumable".equals(x.matType()) : !f.cat().equals(x.matType())) return false;
+                }
+                return true;
+            }).toList();
+
+            plantItems.stream().map(x -> x.storageLoc() == null ? "Unassigned" : x.storageLoc()).distinct().forEach(l -> kids.add(kid(l, "loc", "Storage location",
+                    plantItems.stream().filter(x -> l.equals(x.storageLoc() == null ? "Unassigned" : x.storageLoc())).toList(), List.of(), t)));
             kids.sort(Comparator.comparingDouble((Map<String, Object> k) -> (double) ((Map<?, ?>) k.get("agg")).get("v")).reversed());
         }
         out.put("children", kids);

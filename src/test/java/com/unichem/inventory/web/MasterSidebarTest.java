@@ -113,6 +113,7 @@ class MasterSidebarTest {
             return b;
         });
 
+        lenient().when(slocs.findAll()).thenAnswer(inv -> new ArrayList<>(slocStore.values()));
         lenient().when(slocs.findByActiveTrueOrderByOrderAsc()).thenAnswer(inv ->
                 slocStore.values().stream()
                         .filter(StorageLocation::isActive)
@@ -512,5 +513,79 @@ class MasterSidebarTest {
         assertThatThrownBy(() -> masterService.saveMtype(mt2))
                 .isInstanceOf(DuplicateMaterialTypeMappingException.class)
                 .hasMessage("Duplicate entry found: The combination of Material Type, Dashboard Category, and Business Unit must be unique.");
+    }
+
+    @Test
+    @DisplayName("14. Persist active boolean flag across Business Units, Storage Locations, Material Types, Material Groups, Responsible Functions, and Action Types")
+    void persistActiveFlagAcrossAllMasterEntities() {
+        Map<String, MaterialGroupMap> mgroupStore = new LinkedHashMap<>();
+        Map<String, ResponsibleFunction> fnStore = new LinkedHashMap<>();
+        Map<String, ActionType> actTypeStore = new LinkedHashMap<>();
+
+        lenient().when(mgroups.findAll()).thenAnswer(inv -> new ArrayList<>(mgroupStore.values()));
+        lenient().when(mgroups.findById(anyString())).thenAnswer(inv -> Optional.ofNullable(mgroupStore.get(inv.<String>getArgument(0))));
+        lenient().when(mgroups.save(any(MaterialGroupMap.class))).thenAnswer(inv -> {
+            MaterialGroupMap g = inv.getArgument(0);
+            mgroupStore.put(g.getSapCode(), g);
+            return g;
+        });
+
+        lenient().when(functions.findAll()).thenAnswer(inv -> new ArrayList<>(fnStore.values()));
+        lenient().when(functions.save(any(ResponsibleFunction.class))).thenAnswer(inv -> {
+            ResponsibleFunction f = inv.getArgument(0);
+            fnStore.put(f.getName(), f);
+            return f;
+        });
+
+        lenient().when(actionTypes.findAll()).thenAnswer(inv -> new ArrayList<>(actTypeStore.values()));
+        lenient().when(actionTypes.save(any(ActionType.class))).thenAnswer(inv -> {
+            ActionType a = inv.getArgument(0);
+            actTypeStore.put(a.getName(), a);
+            return a;
+        });
+
+        // 1. Business Units batch save with active true/false
+        BusinessUnit buActive = new BusinessUnit("API", "Active Pharma", "API", true, 1);
+        BusinessUnit buInactive = new BusinessUnit("OLD_BU", "Obsolete BU", null, false, 2);
+        masterService.saveAllBus(List.of(buActive, buInactive));
+        assertThat(masterService.getBusinessUnitsList(false)).hasSize(2);
+        assertThat(masterService.getBusinessUnitsList(true)).extracting(BusinessUnit::getCode).containsExactly("API");
+
+        // 2. Storage Locations batch save with active true/false
+        StorageLocation sl1 = new StorageLocation(null, null, "RM01", "Raw Material Store", "RM", true, 1);
+        StorageLocation sl2 = new StorageLocation(null, null, "OLD1", "Old Store", "General", false, 2);
+        masterService.saveAllSlocs(List.of(sl1, sl2));
+        assertThat(masterService.getAllStorageLocations(false)).hasSize(2);
+        assertThat(masterService.getAllStorageLocations(true)).extracting(StorageLocation::getCode).containsExactly("RM01");
+
+        // 3. Material Types batch save with active true/false
+        MaterialTypeMap mt1 = new MaterialTypeMap(null, "ZRAW", "Raw Materials", "100*", "Raw Material", "API", null, true, 1);
+        MaterialTypeMap mt2 = new MaterialTypeMap(null, "ZOLD", "Old Type", null, "Exclude", "API", null, false, 2);
+        masterService.saveAllMtypes(List.of(mt1, mt2));
+        assertThat(masterService.getAllMaterialTypes(false)).hasSize(2);
+        assertThat(masterService.getAllMaterialTypes(true)).extracting(MaterialTypeMap::getSapCode).containsExactly("ZRAW");
+
+        // 4. Material Groups batch save with active true/false
+        MaterialGroupMap mg1 = new MaterialGroupMap("R001", "Active Group", "Raw Material", null, null, true, 1);
+        MaterialGroupMap mg2 = new MaterialGroupMap("R999", "Inactive Group", "Raw Material", null, null, false, 2);
+        masterService.saveAllMgroups(List.of(mg1, mg2));
+        assertThat(masterService.getAllMaterialGroups(false)).hasSize(2);
+        assertThat(masterService.getAllMaterialGroups(true)).extracting(MaterialGroupMap::getSapCode).containsExactly("R001");
+
+        // 5. Responsible Functions list save with active & is_active
+        masterService.setListGeneric("functions", List.of(
+                Map.of("v", "Production", "active", true),
+                Map.of("v", "LegacyFn", "is_active", false)
+        ));
+        assertThat(masterService.getAllFunctions(false)).hasSize(2);
+        assertThat(masterService.getAllFunctions(true)).extracting(ResponsibleFunction::getName).containsExactly("Production");
+
+        // 6. Action Types list save with active & is_active
+        masterService.setListGeneric("actionTypes", List.of(
+                Map.of("v", "Consumption planning", "active", true),
+                Map.of("v", "Archived Action", "is_active", false)
+        ));
+        assertThat(masterService.getAllActionTypes(false)).hasSize(2);
+        assertThat(masterService.getAllActionTypes(true)).extracting(ActionType::getName).containsExactly("Consumption planning");
     }
 }

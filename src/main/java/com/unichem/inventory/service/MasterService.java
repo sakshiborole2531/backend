@@ -5,7 +5,7 @@ import com.unichem.inventory.dto.Dtos.*;
 import com.unichem.inventory.repo.*;
 import com.unichem.inventory.web.NotFoundException;
 import jakarta.persistence.EntityManager;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,13 +15,13 @@ import static com.unichem.inventory.domain.Constants.*;
 
 /** Masters: business units, plants, storage locations, SAP mappings, functions, persons, action types. */
 @Service
-@RequiredArgsConstructor
 public class MasterService {
     private final BusinessUnitRepository bus;
     private final PlantRepository plants;
     private final StorageLocationRepository slocs;
     private final MaterialTypeMapRepository mtypes;
     private final MaterialGroupMapRepository mgroups;
+    private final NumberSeriesBuMapRepository numSeries;
     private final ResponsibleFunctionRepository functions;
     private final ActionTypeRepository actionTypes;
     private final ResponsiblePersonRepository persons;
@@ -29,16 +29,52 @@ public class MasterService {
     private final EntityManager em;
     private final AuditService audit;
 
+    @Autowired
+    public MasterService(BusinessUnitRepository bus, PlantRepository plants, StorageLocationRepository slocs,
+                         MaterialTypeMapRepository mtypes, MaterialGroupMapRepository mgroups,
+                         @Autowired(required = false) NumberSeriesBuMapRepository numSeries,
+                         ResponsibleFunctionRepository functions, ActionTypeRepository actionTypes,
+                         ResponsiblePersonRepository persons, CurrentUserService current,
+                         EntityManager em, AuditService audit) {
+        this.bus = bus;
+        this.plants = plants;
+        this.slocs = slocs;
+        this.mtypes = mtypes;
+        this.mgroups = mgroups;
+        this.numSeries = numSeries;
+        this.functions = functions;
+        this.actionTypes = actionTypes;
+        this.persons = persons;
+        this.current = current;
+        this.em = em;
+        this.audit = audit;
+    }
+
+    public MasterService(BusinessUnitRepository bus, PlantRepository plants, StorageLocationRepository slocs,
+                         MaterialTypeMapRepository mtypes, MaterialGroupMapRepository mgroups,
+                         ResponsibleFunctionRepository functions, ActionTypeRepository actionTypes,
+                         ResponsiblePersonRepository persons, CurrentUserService current,
+                         EntityManager em, AuditService audit) {
+        this(bus, plants, slocs, mtypes, mgroups, null, functions, actionTypes, persons, current, em, audit);
+    }
+
     public Map<String, Object> all() {
+        return all(false);
+    }
+
+    public Map<String, Object> all(boolean activeOnly) {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("businessUnits", bus.findAllByOrderBySortOrderAscCodeAsc());
-        m.put("plants", plants.findAllByOrderBySortOrderAscNameAsc());
-        m.put("storageLocations", slocs.findAllByOrderBySortOrderAscCodeAsc());
-        m.put("materialTypes", mtypes.findAllByOrderBySortOrderAscSapCodeAsc());
-        m.put("materialGroups", mgroups.findAll(org.springframework.data.domain.Sort.by("sapCode")));
-        m.put("functions", functions.findAllByOrderBySortOrderAscNameAsc().stream().map(ResponsibleFunction::getName).toList());
-        m.put("actionTypes", actionTypes.findAllByOrderBySortOrderAscNameAsc().stream().map(ActionType::getName).toList());
-        m.put("persons", persons.findAll(org.springframework.data.domain.Sort.by("name")));
+        m.put("businessUnits", getBusinessUnitsList(activeOnly));
+        m.put("plants", activeOnly ? plants.findByActiveTrueOrderByOrderAsc() : plants.findAllByOrderBySortOrderAscNameAsc());
+        m.put("storageLocations", getAllStorageLocations(activeOnly));
+        m.put("materialTypes", getAllMaterialTypes(activeOnly));
+        m.put("numberSeriesBu", numSeries == null ? List.of() : (activeOnly
+                ? numSeries.findByActiveTrueOrderBySortOrderAscSeriesPatternAsc()
+                : numSeries.findAllByOrderBySortOrderAscSeriesPatternAsc()));
+        m.put("materialGroups", getAllMaterialGroups(activeOnly));
+        m.put("functions", getAllFunctions(activeOnly));
+        m.put("actionTypes", getAllActionTypes(activeOnly));
+        m.put("persons", getAllPersons(activeOnly));
         m.put("categories", MAT_TYPES);
         m.put("departments", DEPTS);
         m.put("stages", STAGES);
@@ -176,12 +212,26 @@ public class MasterService {
         return new SidebarResponseDto(pl, bl, sl, ml, counts);
     }
 
+    public List<BusinessUnit> getBusinessUnitsList(boolean activeOnly) {
+        List<BusinessUnit> list = activeOnly
+                ? bus.findByActiveTrueOrderByOrderAsc()
+                : bus.findAllByOrderBySortOrderAscCodeAsc();
+        if (list == null || list.isEmpty()) {
+            list = bus.findAll().stream()
+                    .filter(b -> !activeOnly || b.isActive())
+                    .sorted(Comparator.comparingInt(BusinessUnit::getSortOrder).thenComparing(BusinessUnit::getCode))
+                    .toList();
+        }
+        return list;
+    }
+
     @Transactional
     public BusinessUnit saveBu(BusinessUnit b) {
         if (b.getCode() == null || b.getCode().isBlank() || b.getName() == null || b.getName().isBlank()) throw new IllegalArgumentException("Business unit code and name are required");
         b.setCode(b.getCode().trim());
         b.setName(b.getName().trim());
         if (b.getAlias() != null && b.getAlias().isBlank()) b.setAlias(null);
+        if (b.getActive() == null) b.setActive(true);
         Optional<BusinessUnit> existing = bus.findById(b.getCode());
         if (existing.isPresent()) {
             BusinessUnit cur = existing.get();
@@ -195,6 +245,19 @@ public class MasterService {
         b.setUpdatedAt(java.time.OffsetDateTime.now());
         audit.log("Master saved", "Business unit " + b.getCode() + (b.isActive() ? "" : " · inactive"));
         return bus.save(b);
+    }
+
+    @Transactional
+    public List<BusinessUnit> saveAllBus(List<BusinessUnit> list) {
+        if (list == null || list.isEmpty()) return List.of();
+        List<BusinessUnit> saved = new ArrayList<>();
+        int idx = 1;
+        for (BusinessUnit b : list) {
+            if (b.getSortOrder() == 0) b.setSortOrder(idx);
+            idx++;
+            saved.add(saveBu(b));
+        }
+        return saved;
     }
 
     private long nextBuId() {
@@ -264,18 +327,71 @@ public class MasterService {
         audit.log("Master deleted", "Plant " + p.getName() + " (inventory records are kept)");
     }
 
+    public List<StorageLocation> getAllStorageLocations(boolean activeOnly) {
+        List<StorageLocation> list = activeOnly
+                ? slocs.findByActiveTrueOrderByOrderAsc()
+                : slocs.findAllByOrderBySortOrderAscCodeAsc();
+        if (list == null || list.isEmpty()) {
+            list = slocs.findAll().stream()
+                    .filter(s -> !activeOnly || s.isActive())
+                    .sorted(Comparator.comparingInt(StorageLocation::getSortOrder).thenComparing(StorageLocation::getCode))
+                    .toList();
+        }
+        return list;
+    }
+
     @Transactional public StorageLocation saveSloc(StorageLocation s) {
         if (s.getCode() == null || s.getCode().isBlank() || s.getName() == null || s.getName().isBlank()) throw new IllegalArgumentException("Code and description are required");
         s.setCode(s.getCode().trim());
         s.setName(s.getName().trim());
         if (s.getPlantName() != null && s.getPlantName().isBlank()) s.setPlantName(null);
+        if (s.getStorageType() == null || s.getStorageType().isBlank()) s.setStorageType("General");
+        if (s.getActive() == null) s.setActive(true);
+        if (s.getId() != null) {
+            slocs.findById(s.getId()).ifPresent(existing -> {
+                if (s.getSortOrder() == 0 && existing.getSortOrder() > 0) {
+                    s.setSortOrder(existing.getSortOrder());
+                }
+            });
+        }
         audit.log("Master saved", "Storage location " + s.getCode() + (s.isActive() ? "" : " · inactive"));
         return slocs.save(s);
     }
+
+    @Transactional public StorageLocation updateSloc(Long id, StorageLocation s) {
+        if (id != null) s.setId(id);
+        return saveSloc(s);
+    }
+
+    @Transactional public List<StorageLocation> saveAllSlocs(List<StorageLocation> list) {
+        if (list == null || list.isEmpty()) return List.of();
+        List<StorageLocation> saved = new ArrayList<>();
+        int idx = 1;
+        for (StorageLocation s : list) {
+            if (s.getSortOrder() == 0) s.setSortOrder(idx);
+            idx++;
+            saved.add(saveSloc(s));
+        }
+        return saved;
+    }
+
     @Transactional public void deleteSloc(Long id) { slocs.deleteById(id); audit.log("Master deleted", "Storage location " + id); }
 
     public List<MaterialTypeMap> getAllMaterialTypes() {
-        return mtypes.findAllByOrderBySortOrderAscSapCodeAsc();
+        return getAllMaterialTypes(false);
+    }
+
+    public List<MaterialTypeMap> getAllMaterialTypes(boolean activeOnly) {
+        List<MaterialTypeMap> list = activeOnly
+                ? mtypes.findByActiveTrueOrderByOrderAsc()
+                : mtypes.findAllByOrderBySortOrderAscSapCodeAsc();
+        if (list == null || list.isEmpty()) {
+            list = mtypes.findAll().stream()
+                    .filter(m -> !activeOnly || m.isActive())
+                    .sorted(Comparator.comparingInt(MaterialTypeMap::getSortOrder).thenComparing(MaterialTypeMap::getSapCode))
+                    .toList();
+        }
+        return list;
     }
 
     public MaterialTypeMap getMaterialTypeByIdentifier(String identifier) {
@@ -441,26 +557,257 @@ public class MasterService {
         }
     }
 
+    // =========================================================================
+    // Number Series by Business Unit REST Service Methods
+    // =========================================================================
+
+    public List<NumberSeriesBuMap> getAllNumberSeriesBu() {
+        return numSeries.findAllByOrderBySortOrderAscSeriesPatternAsc();
+    }
+
+    @Transactional
+    public NumberSeriesBuMap saveNumberSeriesBu(NumberSeriesBuMap m) {
+        if (m.getSeriesPattern() == null || m.getSeriesPattern().isBlank()) {
+            throw new IllegalArgumentException("Number Series is required");
+        }
+        if (m.getBusinessUnit() == null || m.getBusinessUnit().isBlank()) {
+            throw new IllegalArgumentException("Business Unit is required");
+        }
+        if (m.getCategory() == null || m.getCategory().isBlank()) {
+            throw new IllegalArgumentException("Category in this BU is required");
+        }
+
+        m.setSeriesPattern(m.getSeriesPattern().trim());
+        m.setBusinessUnit(m.getBusinessUnit().trim());
+        m.setCategory(m.getCategory().trim());
+        if (m.getDepartment() != null) m.setDepartment(m.getDepartment().trim());
+        if (m.getDescription() != null) m.setDescription(m.getDescription().trim());
+        if (m.getActive() == null) m.setActive(true);
+        if (m.getSortOrder() == null) m.setSortOrder(0);
+
+        // Check duplicate active combination
+        if (Boolean.TRUE.equals(m.getActive())) {
+            Optional<NumberSeriesBuMap> existing = numSeries.findBySeriesPatternIgnoreCaseAndBusinessUnitIgnoreCaseAndActiveTrue(
+                    m.getSeriesPattern(), m.getBusinessUnit()
+            );
+            if (existing.isPresent() && (m.getId() == null || !existing.get().getId().equals(m.getId()))) {
+                throw new IllegalArgumentException("An active mapping already exists for this Number Series and Business Unit.");
+            }
+        }
+
+        NumberSeriesBuMap saved = numSeries.save(m);
+        audit.log("Master saved", "Number series by BU: " + saved.getSeriesPattern() + " (" + saved.getBusinessUnit() + " -> " + saved.getCategory() + ")");
+        return saved;
+    }
+
+    @Transactional
+    public List<NumberSeriesBuMap> saveAllNumberSeriesBu(List<NumberSeriesBuMap> list) {
+        if (list == null || list.isEmpty()) return List.of();
+        List<NumberSeriesBuMap> saved = new ArrayList<>();
+        for (NumberSeriesBuMap m : list) {
+            saved.add(saveNumberSeriesBu(m));
+        }
+        return saved;
+    }
+
+    @Transactional
+    public void deleteNumberSeriesBu(Long id) {
+        if (id == null) return;
+        if (numSeries.existsById(id)) {
+            numSeries.deleteById(id);
+            audit.log("Master deleted", "Number series by BU id " + id);
+        }
+    }
+
+    public List<MaterialGroupMap> getAllMaterialGroups(boolean activeOnly) {
+        List<MaterialGroupMap> list = activeOnly
+                ? mgroups.findByActiveTrueOrderByOrderAsc()
+                : mgroups.findAllByOrderBySortOrderAscSapCodeAsc();
+        if (list == null || list.isEmpty()) {
+            List<MaterialGroupMap> fallback = mgroups.findAll(org.springframework.data.domain.Sort.by("sapCode"));
+            if (fallback == null || fallback.isEmpty()) {
+                fallback = mgroups.findAll();
+            }
+            list = (fallback == null ? List.<MaterialGroupMap>of() : fallback).stream()
+                    .filter(g -> !activeOnly || g.isActive())
+                    .sorted(Comparator.comparingInt(MaterialGroupMap::getSortOrder).thenComparing(MaterialGroupMap::getSapCode))
+                    .toList();
+        }
+        return list;
+    }
+
     @Transactional public MaterialGroupMap saveMgroup(MaterialGroupMap m) {
+        if (m.getSapCode() == null || m.getSapCode().isBlank()) throw new IllegalArgumentException("Material group code is required");
+        m.setSapCode(m.getSapCode().trim());
         if (m.getCategory() != null && m.getCategory().isBlank()) m.setCategory(null);
         if (m.getDepartment() != null && m.getDepartment().isBlank()) m.setDepartment(null);
-        audit.log("Master saved", "Material group " + m.getSapCode());
+        if (m.getSubCategory() != null && m.getSubCategory().isBlank()) m.setSubCategory(null);
+        if (m.getActive() == null) m.setActive(true);
+        mgroups.findById(m.getSapCode()).ifPresent(existing -> {
+            if (m.getSortOrder() == 0 && existing.getSortOrder() > 0) {
+                m.setSortOrder(existing.getSortOrder());
+            }
+        });
+        audit.log("Master saved", "Material group " + m.getSapCode() + (m.isActive() ? "" : " · inactive"));
         return mgroups.save(m);
     }
+
+    @Transactional public MaterialGroupMap updateMgroup(String code, MaterialGroupMap m) {
+        if (code != null && !code.isBlank() && (m.getSapCode() == null || m.getSapCode().isBlank())) {
+            m.setSapCode(code.trim());
+        }
+        return saveMgroup(m);
+    }
+
+    @Transactional public List<MaterialGroupMap> saveAllMgroups(List<MaterialGroupMap> list) {
+        if (list == null || list.isEmpty()) return List.of();
+        List<MaterialGroupMap> saved = new ArrayList<>();
+        int idx = 1;
+        for (MaterialGroupMap m : list) {
+            if (m.getSortOrder() == 0) m.setSortOrder(idx);
+            idx++;
+            saved.add(saveMgroup(m));
+        }
+        return saved;
+    }
+
     @Transactional public void deleteMgroup(String code) { mgroups.deleteById(code); audit.log("Master deleted", "Material group " + code); }
 
+    public List<ResponsibleFunction> getAllFunctions(boolean activeOnly) {
+        List<ResponsibleFunction> list = activeOnly
+                ? functions.findByActiveTrueOrderBySortOrderAscNameAsc()
+                : functions.findAllByOrderBySortOrderAscNameAsc();
+        if (list == null || list.isEmpty()) {
+            list = functions.findAll().stream()
+                    .filter(f -> !activeOnly || f.isActive())
+                    .sorted(Comparator.comparingInt(ResponsibleFunction::getSortOrder).thenComparing(ResponsibleFunction::getName))
+                    .toList();
+        }
+        return list;
+    }
+
+    @Transactional public ResponsibleFunction saveFunction(ResponsibleFunction f) {
+        if (f.getName() == null || f.getName().isBlank()) throw new IllegalArgumentException("Function name is required");
+        f.setName(f.getName().trim());
+        if (f.getActive() == null) f.setActive(true);
+        audit.log("Master saved", "Responsible function " + f.getName() + (f.isActive() ? "" : " · inactive"));
+        return functions.save(f);
+    }
+
+    @Transactional public List<ResponsibleFunction> saveAllFunctions(List<ResponsibleFunction> list) {
+        if (list == null) return List.of();
+        setListGeneric("functions", list);
+        return getAllFunctions(false);
+    }
+
+    public List<ActionType> getAllActionTypes(boolean activeOnly) {
+        List<ActionType> list = activeOnly
+                ? actionTypes.findByActiveTrueOrderBySortOrderAscNameAsc()
+                : actionTypes.findAllByOrderBySortOrderAscNameAsc();
+        if (list == null || list.isEmpty()) {
+            list = actionTypes.findAll().stream()
+                    .filter(a -> !activeOnly || a.isActive())
+                    .sorted(Comparator.comparingInt(ActionType::getSortOrder).thenComparing(ActionType::getName))
+                    .toList();
+        }
+        return list;
+    }
+
+    @Transactional public ActionType saveActionType(ActionType a) {
+        if (a.getName() == null || a.getName().isBlank()) throw new IllegalArgumentException("Action type name is required");
+        a.setName(a.getName().trim());
+        if (a.getActive() == null) a.setActive(true);
+        audit.log("Master saved", "Action type " + a.getName() + (a.isActive() ? "" : " · inactive"));
+        return actionTypes.save(a);
+    }
+
+    @Transactional public List<ActionType> saveAllActionTypes(List<ActionType> list) {
+        if (list == null) return List.of();
+        setListGeneric("actionTypes", list);
+        return getAllActionTypes(false);
+    }
+
     @Transactional public void setList(String kind, List<String> values) {
-        List<String> v = values.stream().map(String::trim).filter(s -> !s.isEmpty()).distinct().toList();
-        if ("functions".equals(kind)) {
-            Set<String> keep = new HashSet<>(v);
+        setListGeneric(kind, values);
+    }
+
+    @Transactional public void setListGeneric(String kind, List<?> items) {
+        if ("functions".equalsIgnoreCase(kind)) {
+            Map<String, Boolean> activeMap = new LinkedHashMap<>();
+            List<String> names = new ArrayList<>();
+            for (Object obj : items) {
+                if (obj instanceof ResponsibleFunction rf) {
+                    String name = rf.getName() != null ? rf.getName().trim() : "";
+                    if (!name.isEmpty()) {
+                        activeMap.put(name, rf.isActive());
+                        if (!names.contains(name)) names.add(name);
+                    }
+                } else if (obj instanceof Map<?, ?> m) {
+                    String name = String.valueOf(m.get("v") != null ? m.get("v") : m.get("name") != null ? m.get("name") : "").trim();
+                    if (!name.isEmpty()) {
+                        Object rawAct = m.get("active") != null ? m.get("active") : (m.get("is_active") != null ? m.get("is_active") : m.get("isActive"));
+                        boolean act = parseActiveFlag(rawAct);
+                        activeMap.put(name, act);
+                        if (!names.contains(name)) names.add(name);
+                    }
+                } else if (obj != null) {
+                    String name = String.valueOf(obj).trim();
+                    if (!name.isEmpty()) {
+                        activeMap.put(name, true);
+                        if (!names.contains(name)) names.add(name);
+                    }
+                }
+            }
+            Set<String> keep = new HashSet<>(names);
             functions.findAll().stream().filter(f -> !keep.contains(f.getName())).forEach(functions::delete);
-            for (int i = 0; i < v.size(); i++) functions.save(new ResponsibleFunction(v.get(i), i));
-        } else if ("actionTypes".equals(kind)) {
-            Set<String> keep = new HashSet<>(v);
+            for (int i = 0; i < names.size(); i++) {
+                String n = names.get(i);
+                boolean act = activeMap.getOrDefault(n, true);
+                functions.save(new ResponsibleFunction(n, act, i));
+            }
+            audit.log("Master saved", "functions: " + String.join(", ", names));
+        } else if ("actionTypes".equalsIgnoreCase(kind) || "acttypes".equalsIgnoreCase(kind)) {
+            Map<String, Boolean> activeMap = new LinkedHashMap<>();
+            List<String> names = new ArrayList<>();
+            for (Object obj : items) {
+                if (obj instanceof ActionType at) {
+                    String name = at.getName() != null ? at.getName().trim() : "";
+                    if (!name.isEmpty()) {
+                        activeMap.put(name, at.isActive());
+                        if (!names.contains(name)) names.add(name);
+                    }
+                } else if (obj instanceof Map<?, ?> m) {
+                    String name = String.valueOf(m.get("v") != null ? m.get("v") : m.get("name") != null ? m.get("name") : "").trim();
+                    if (!name.isEmpty()) {
+                        Object rawAct = m.get("active") != null ? m.get("active") : (m.get("is_active") != null ? m.get("is_active") : m.get("isActive"));
+                        boolean act = parseActiveFlag(rawAct);
+                        activeMap.put(name, act);
+                        if (!names.contains(name)) names.add(name);
+                    }
+                } else if (obj != null) {
+                    String name = String.valueOf(obj).trim();
+                    if (!name.isEmpty()) {
+                        activeMap.put(name, true);
+                        if (!names.contains(name)) names.add(name);
+                    }
+                }
+            }
+            Set<String> keep = new HashSet<>(names);
             actionTypes.findAll().stream().filter(f -> !keep.contains(f.getName())).forEach(actionTypes::delete);
-            for (int i = 0; i < v.size(); i++) actionTypes.save(new ActionType(v.get(i), i));
+            for (int i = 0; i < names.size(); i++) {
+                String n = names.get(i);
+                boolean act = activeMap.getOrDefault(n, true);
+                actionTypes.save(new ActionType(n, act, i));
+            }
+            audit.log("Master saved", "actionTypes: " + String.join(", ", names));
         } else throw new IllegalArgumentException("Unknown list " + kind);
-        audit.log("Master saved", kind + ": " + String.join(", ", v));
+    }
+
+    private static boolean parseActiveFlag(Object rawAct) {
+        if (rawAct == null) return true;
+        if (rawAct instanceof Boolean b) return b;
+        String s = String.valueOf(rawAct).trim().toLowerCase(Locale.ROOT);
+        return !("false".equals(s) || "0".equals(s) || "no".equals(s) || "n".equals(s));
     }
 
     // =========================================================================
@@ -825,9 +1172,27 @@ public class MasterService {
         return t;
     }
 
+    public List<ResponsiblePerson> getAllPersons(boolean activeOnly) {
+        List<ResponsiblePerson> list = activeOnly
+                ? persons.findByActiveTrueOrderBySortOrderAscNameAsc()
+                : persons.findAllByOrderBySortOrderAscNameAsc();
+        if (list == null || list.isEmpty()) {
+            List<ResponsiblePerson> fallback = persons.findAll(org.springframework.data.domain.Sort.by("name"));
+            if (fallback == null || fallback.isEmpty()) {
+                fallback = persons.findAll();
+            }
+            list = (fallback == null ? List.<ResponsiblePerson>of() : fallback).stream()
+                    .filter(p -> !activeOnly || p.isActive())
+                    .toList();
+        }
+        return list;
+    }
+
     @Transactional public ResponsiblePerson savePerson(ResponsiblePerson p) {
         if (p.getName() == null || p.getName().isBlank()) throw new IllegalArgumentException("Name is required");
-        audit.log("Master saved", "Responsible person " + p.getName());
+        p.setName(p.getName().trim());
+        if (p.getActive() == null) p.setActive(true);
+        audit.log("Master saved", "Responsible person " + p.getName() + (p.isActive() ? "" : " · inactive"));
         return persons.save(p);
     }
     @Transactional public void deletePerson(Long id) { persons.deleteById(id); audit.log("Master deleted", "Responsible person " + id); }

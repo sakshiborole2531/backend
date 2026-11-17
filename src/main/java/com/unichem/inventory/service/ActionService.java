@@ -214,7 +214,7 @@ public class ActionService {
 
     public Map<String, Object> view(ActionItem a) {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("id", a.getId()); m.put("itemKey", a.getItemKey()); m.put("bu", a.getBuCode()); m.put("plant", a.getPlant());
+        m.put("id", a.getId()); m.put("itemKey", a.getItemKey()); m.put("bu", a.getBuCode()); m.put("buCode", a.getBuCode()); m.put("plant", a.getPlant());
         m.put("code", a.getCode()); m.put("name", a.getName()); m.put("batch", a.getBatch()); m.put("matType", a.getMatType());
         m.put("valueAtRaise", a.getValueAtRaise()); m.put("exception", a.getException()); m.put("actionType", a.getActionType());
         m.put("plan", a.getPlan()); m.put("priority", a.getPriority()); m.put("functionName", a.getFunctionName()); m.put("person", a.getPerson());

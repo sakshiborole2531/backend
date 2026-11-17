@@ -9,9 +9,12 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.LockedException;
+import org.springframework.transaction.TransactionTimedOutException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 
 import java.util.stream.Collectors;
 
@@ -57,6 +60,18 @@ public class ApiExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ProblemDetail valid(MethodArgumentNotValidException e) {
         return pd(HttpStatus.BAD_REQUEST, e.getBindingResult().getFieldErrors().stream().map(f -> f.getField() + " " + f.getDefaultMessage()).collect(Collectors.joining("; ")));
+    }
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    ProblemDetail maxUpload(MaxUploadSizeExceededException e) {
+        return pd(HttpStatus.BAD_REQUEST, "Uploaded file exceeds the maximum allowed size.");
+    }
+    @ExceptionHandler(MultipartException.class)
+    ProblemDetail multipart(MultipartException e) {
+        return pd(HttpStatus.BAD_REQUEST, e.getMessage() != null ? e.getMessage() : "Invalid multipart file upload request.");
+    }
+    @ExceptionHandler(TransactionTimedOutException.class)
+    ProblemDetail txTimeout(TransactionTimedOutException e) {
+        return pd(HttpStatus.INTERNAL_SERVER_ERROR, "Database transaction timed out. Please try again.");
     }
     @ExceptionHandler(Exception.class)
     ProblemDetail unexpected(Exception e) {

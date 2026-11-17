@@ -6,6 +6,7 @@ import org.springframework.data.repository.query.Param;
 import java.util.*;
 
 public interface StorageLocationRepository extends JpaRepository<StorageLocation, Long> {
+    List<StorageLocation> findByActiveTrue();
     List<StorageLocation> findAllByOrderByCodeAsc();
     List<StorageLocation> findAllByOrderBySortOrderAscCodeAsc();
     List<StorageLocation> findByActiveTrueOrderBySortOrderAscCodeAsc();
