@@ -51,7 +51,13 @@ public class InventoryController {
             }
     );
 
+    static InventoryService.Filter filter(String bu, String plant, String cat, String status, String dept, String loc, String q, Double minValue, LocalDate from, LocalDate to) {
+        return new InventoryService.Filter(bu, plant, cat, status, dept, loc, q, minValue, from, to);
+    }
+
     static InventoryService.Filter filter(String bu, String plant, String cat, String status, String dept, String loc, String q, Double minValue) {
+        return new InventoryService.Filter(bu, plant, cat, status, dept, loc, q, minValue, null, null);
+    }
         return new InventoryService.Filter(bu, plant, cat, status, dept, loc, q, minValue);
     }
 
@@ -59,8 +65,8 @@ public class InventoryController {
     public List<CalcItem> list(@RequestParam(required = false) String bu, @RequestParam(required = false) String plant,
                                @RequestParam(required = false) String cat, @RequestParam(required = false) String status,
                                @RequestParam(required = false) String dept, @RequestParam(required = false) String loc,
-                               @RequestParam(required = false) String q, @RequestParam(required = false) Double minValue) {
-        return inventory.calculated(filter(bu, plant, cat, status, dept, loc, q, minValue));
+                               @RequestParam(required = false) String q, @RequestParam(required = false) Double minValue, @RequestParam(required = false) LocalDate from, @RequestParam(required = false) LocalDate to) {
+        return inventory.calculated(filter(bu, plant, cat, status, dept, loc, q, minValue, from, to));
     }
 
     @GetMapping("/{id}") @PreAuthorize("hasAuthority('view.inventory')")

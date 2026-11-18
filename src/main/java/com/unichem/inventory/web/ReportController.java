@@ -54,14 +54,14 @@ public class ReportController {
     public Map<String, Object> dashboard(@RequestParam(required = false) String bu, @RequestParam(required = false) String plant,
                                          @RequestParam(required = false) String cat, @RequestParam(required = false) String status,
                                          @RequestParam(required = false) String dept, @RequestParam(required = false) String loc,
-                                         @RequestParam(required = false) String q) {
-        return analytics.dashboard(InventoryController.filter(bu, plant, cat, status, dept, loc, q, null));
+                                         @RequestParam(required = false) String q, @RequestParam(required = false) Double minValue, @RequestParam(required = false) LocalDate from, @RequestParam(required = false) LocalDate to) {
+        return analytics.dashboard(InventoryController.filter(bu, plant, cat, status, dept, loc, q, minValue, from, to));
     }
 
     @GetMapping("/matrix") @PreAuthorize("hasAuthority('view.inventory')")
     public Map<String, Object> matrix(@RequestParam(defaultValue = "value") String measure, @RequestParam(required = false) String bu,
                                       @RequestParam(required = false) String cat, @RequestParam(required = false) String dept,
-                                      @RequestParam(required = false) String q) {
+                                      @RequestParam(required = false) String q, @RequestParam(required = false) Double minValue, @RequestParam(required = false) LocalDate from, @RequestParam(required = false) LocalDate to) {
         return analytics.matrix(InventoryController.filter(bu, null, cat, null, dept, null, q, null), measure);
     }
 

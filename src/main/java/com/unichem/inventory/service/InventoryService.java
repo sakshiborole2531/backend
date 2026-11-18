@@ -29,7 +29,7 @@ public class InventoryService {
     private final AuditService audit;
 
     /** Filters used by every analysis page. */
-    public record Filter(String bu, String plant, String cat, String status, String dept, String loc, String q, Double minValue) {
+    public record Filter(String bu, String plant, String cat, String status, String dept, String loc, String q, Double minValue, LocalDate from, LocalDate to) {
         static boolean all(String v) { return v == null || v.isBlank() || "All".equals(v); }
         public boolean test(CalcItem x) {
             if (!all(bu) && !bu.equals(x.bu())) return false;
@@ -45,7 +45,10 @@ public class InventoryService {
                         .map(s -> s == null ? "" : s).toList()).toLowerCase();
                 if (!hay.contains(q.trim().toLowerCase())) return false;
             }
-            return minValue == null || x.value() >= minValue;
+            if (minValue != null && x.value() < minValue) return false;
+            if (from != null && (x.receiptDate() == null || x.receiptDate().isBefore(from))) return false;
+            if (to != null && (x.receiptDate() == null || x.receiptDate().isAfter(to))) return false;
+            return true;
         }
     }
 
