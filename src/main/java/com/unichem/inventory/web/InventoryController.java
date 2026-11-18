@@ -58,8 +58,6 @@ public class InventoryController {
     static InventoryService.Filter filter(String bu, String plant, String cat, String status, String dept, String loc, String q, Double minValue) {
         return new InventoryService.Filter(bu, plant, cat, status, dept, loc, q, minValue, null, null);
     }
-        return new InventoryService.Filter(bu, plant, cat, status, dept, loc, q, minValue);
-    }
 
     @GetMapping @PreAuthorize("hasAuthority('view.inventory')")
     public List<CalcItem> list(@RequestParam(required = false) String bu, @RequestParam(required = false) String plant,

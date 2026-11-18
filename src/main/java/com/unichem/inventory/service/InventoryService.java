@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Stream;
 
@@ -30,6 +31,9 @@ public class InventoryService {
 
     /** Filters used by every analysis page. */
     public record Filter(String bu, String plant, String cat, String status, String dept, String loc, String q, Double minValue, LocalDate from, LocalDate to) {
+        public Filter(String bu, String plant, String cat, String status, String dept, String loc, String q, Double minValue) {
+            this(bu, plant, cat, status, dept, loc, q, minValue, null, null);
+        }
         static boolean all(String v) { return v == null || v.isBlank() || "All".equals(v); }
         public boolean test(CalcItem x) {
             if (!all(bu) && !bu.equals(x.bu())) return false;
