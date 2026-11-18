@@ -35,21 +35,52 @@ public class AnalyticsService {
 
     public Map<String, Object> agg(List<CalcItem> list, Thresholds t) {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("n", list.size());
-        m.put("materials", list.stream().map(CalcItem::code).distinct().count());
-        m.put("v", sum(list, CalcItem::value)); m.put("u", sum(list, CalcItem::uVal)); m.put("q", sum(list, CalcItem::qVal)); m.put("b", sum(list, CalcItem::bVal));
+        int totalBatches = list.size();
+        long materialsCount = list.stream().map(CalcItem::code).distinct().count();
+        long uN = list.stream().filter(x -> x.unrestrictedQty() > 0).count();
+        long qN = list.stream().filter(x -> x.qualityQty() > 0).count();
+        long bN = list.stream().filter(x -> x.blockedQty() > 0).count();
+
+        m.put("n", totalBatches);
+        m.put("batchCount", totalBatches);
+        m.put("totalBatchCount", totalBatches);
+        m.put("materials", materialsCount);
+        m.put("v", sum(list, CalcItem::value));
+        m.put("u", sum(list, CalcItem::uVal));
+        m.put("uN", uN);
+        m.put("unrestrictedBatchCount", uN);
+        m.put("q", sum(list, CalcItem::qVal));
+        m.put("qN", qN);
+        m.put("qualityBatchCount", qN);
+        m.put("b", sum(list, CalcItem::bVal));
+        m.put("bN", bN);
+        m.put("blockedBatchCount", bN);
+
         List<CalcItem> aged = list.stream().filter(x -> x.age() != null && x.age() > t.agingDays()).toList();
         List<CalcItem> exp = list.stream().filter(x -> x.rsl() != null && x.rsl() >= 0 && x.rsl() <= t.expiryDays()).toList();
         List<CalcItem> expd = list.stream().filter(x -> x.rsl() != null && x.rsl() < 0).toList();
         List<CalcItem> cons = list.stream().filter(x -> "Consumable".equals(x.matType())).toList();
         List<CalcItem> idle = cons.stream().filter(x -> "Non-Moving".equals(x.consStatus()) || "Long Lying".equals(x.consStatus())).toList();
         List<CalcItem> exc = list.stream().filter(x -> !x.realFlags().isEmpty()).toList();
-        m.put("aged", sum(aged, CalcItem::value)); m.put("agedN", aged.size());
-        m.put("exp", sum(exp, CalcItem::value)); m.put("expN", exp.size());
-        m.put("expd", sum(expd, CalcItem::value)); m.put("expdN", expd.size());
-        m.put("cons", sum(cons, CalcItem::value)); m.put("consN", cons.size());
-        m.put("idle", sum(idle, CalcItem::value)); m.put("idleN", idle.size());
-        m.put("exc", exc.size()); m.put("excV", sum(exc, CalcItem::value));
+
+        m.put("aged", sum(aged, CalcItem::value));
+        m.put("agedN", aged.size());
+        m.put("agedBatchCount", aged.size());
+        m.put("exp", sum(exp, CalcItem::value));
+        m.put("expN", exp.size());
+        m.put("expiryBatchCount", exp.size());
+        m.put("expd", sum(expd, CalcItem::value));
+        m.put("expdN", expd.size());
+        m.put("expiredBatchCount", expd.size());
+        m.put("cons", sum(cons, CalcItem::value));
+        m.put("consN", cons.size());
+        m.put("consumableBatchCount", cons.size());
+        m.put("idle", sum(idle, CalcItem::value));
+        m.put("idleN", idle.size());
+        m.put("idleBatchCount", idle.size());
+        m.put("exc", exc.size());
+        m.put("exceptionBatchCount", exc.size());
+        m.put("excV", sum(exc, CalcItem::value));
         m.put("p1", exc.stream().filter(x -> "P1".equals(x.prio())).count());
         m.put("p2", exc.stream().filter(x -> "P2".equals(x.prio())).count());
         m.put("p3", exc.stream().filter(x -> "P3".equals(x.prio())).count());
@@ -89,9 +120,15 @@ public class AnalyticsService {
                 .filter(a -> "All".equals(bu) || bu.equals(a.getBuCode()))
                 .filter(a -> "All".equals(plant) || plant.equals(a.getPlant())).toList();
 
+        Map<String, Object> totalsMap = agg(d, t);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("level", level); out.put("bu", bu); out.put("plant", plant); out.put("thresholds", t);
-        out.put("totals", agg(d, t));
+        out.put("totals", totalsMap);
+        out.put("batchCount", totalsMap.get("batchCount"));
+        out.put("totalBatchCount", totalsMap.get("totalBatchCount"));
+        out.put("unrestrictedBatchCount", totalsMap.get("unrestrictedBatchCount"));
+        out.put("qualityBatchCount", totalsMap.get("qualityBatchCount"));
+        out.put("blockedBatchCount", totalsMap.get("blockedBatchCount"));
 
         // children of the current level (drill-down cards + comparison table)
         List<Map<String, Object>> kids = new ArrayList<>();
@@ -133,24 +170,47 @@ public class AnalyticsService {
         }
         out.put("children", kids);
 
-        // Visibility — category × stock status
+        // Visibility — category × stock status (with batchCount per category and per status)
         out.put("byCategory", MAT_TYPES.stream().map(c -> {
             List<CalcItem> r = d.stream().filter(x -> c.equals(x.matType())).toList();
-            return Map.of("category", c, "short", SHORT.get(c), "n", r.size(), "u", sum(r, CalcItem::uVal), "q", sum(r, CalcItem::qVal), "b", sum(r, CalcItem::bVal), "v", sum(r, CalcItem::value));
+            long uCount = r.stream().filter(x -> x.unrestrictedQty() > 0).count();
+            long qCount = r.stream().filter(x -> x.qualityQty() > 0).count();
+            long bCount = r.stream().filter(x -> x.blockedQty() > 0).count();
+            Map<String, Object> cm = new LinkedHashMap<>();
+            cm.put("category", c);
+            cm.put("short", SHORT.get(c));
+            cm.put("n", r.size());
+            cm.put("batchCount", r.size());
+            cm.put("u", sum(r, CalcItem::uVal));
+            cm.put("uN", uCount);
+            cm.put("unrestrictedBatchCount", uCount);
+            cm.put("q", sum(r, CalcItem::qVal));
+            cm.put("qN", qCount);
+            cm.put("qualityBatchCount", qCount);
+            cm.put("b", sum(r, CalcItem::bVal));
+            cm.put("bN", bCount);
+            cm.put("blockedBatchCount", bCount);
+            cm.put("v", sum(r, CalcItem::value));
+            return cm;
         }).toList());
+        out.put("byStatus", List.of(
+                Map.of("status", "Unrestricted", "value", totalsMap.get("u"), "batchCount", totalsMap.get("unrestrictedBatchCount"), "n", totalsMap.get("uN")),
+                Map.of("status", "Quality", "value", totalsMap.get("q"), "batchCount", totalsMap.get("qualityBatchCount"), "n", totalsMap.get("qN")),
+                Map.of("status", "Blocked", "value", totalsMap.get("b"), "batchCount", totalsMap.get("blockedBatchCount"), "n", totalsMap.get("bN"))
+        ));
         out.put("aging", Arrays.stream(CalcService.BUCKETS).map(b -> {
             List<CalcItem> r = d.stream().filter(x -> b.equals(x.bucket())).toList();
-            return Map.of("bucket", b, "n", r.size(), "v", sum(r, CalcItem::value));
+            return Map.of("bucket", b, "n", r.size(), "batchCount", r.size(), "v", sum(r, CalcItem::value));
         }).toList());
         List<String> bands = List.of("Expired", "≤30", "31–90", "91–" + t.expiryDays());
         out.put("expiryBands", bands.stream().map(b -> {
             List<CalcItem> r = d.stream().filter(x -> b.equals(x.band())).toList();
-            return Map.of("band", b, "n", r.size(), "v", sum(r, CalcItem::value));
+            return Map.of("band", b, "n", r.size(), "batchCount", r.size(), "v", sum(r, CalcItem::value));
         }).toList());
         out.put("consumablesByDept", DEPTS.stream().map(dp -> {
             List<CalcItem> r = d.stream().filter(x -> dp.equals(x.dept())).toList();
             long idle = r.stream().filter(x -> (x.age() != null && x.age() > t.longLyingDays()) || "Non-Moving".equals(x.consStatus())).count();
-            return Map.of("dept", dp, "n", r.size(), "v", sum(r, CalcItem::value), "idle", idle);
+            return Map.of("dept", dp, "n", r.size(), "batchCount", r.size(), "v", sum(r, CalcItem::value), "idle", idle);
         }).toList());
 
         // Identification & prioritization

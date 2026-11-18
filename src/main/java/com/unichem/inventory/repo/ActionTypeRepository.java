@@ -11,4 +11,6 @@ public interface ActionTypeRepository extends JpaRepository<ActionType, String> 
     List<ActionType> findByActiveTrueOrderBySortOrderAscNameAsc();
     @Query("SELECT a FROM ActionType a WHERE a.active = true ORDER BY a.sortOrder ASC, a.name ASC")
     List<ActionType> findByActiveTrueOrderByOrderAsc();
+    @Query("SELECT at.name FROM ActionType at WHERE at.active = true ORDER BY at.sortOrder ASC, at.name ASC")
+    List<String> findAllActiveActionTypeNames();
 }

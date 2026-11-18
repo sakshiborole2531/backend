@@ -114,6 +114,34 @@ public class BusinessUnitController {
         return ResponseEntity.ok(masters.getOrganizationHierarchy(organizationId, companyShort));
     }
 
+    /**
+     * H. Get Responsible Functions (clean string names by default, or full objects when format=full)
+     * GET /api/functions
+     */
+    @GetMapping("/functions")
+    public ResponseEntity<List<?>> getFunctions(
+            @RequestParam(defaultValue = "true") boolean activeOnly,
+            @RequestParam(defaultValue = "names") String format) {
+        if ("objects".equalsIgnoreCase(format) || "full".equalsIgnoreCase(format) || "entities".equalsIgnoreCase(format)) {
+            return ResponseEntity.ok(masters.getAllFunctions(activeOnly));
+        }
+        return ResponseEntity.ok(masters.getFunctionNames(activeOnly));
+    }
+
+    /**
+     * I. Get Action Types (clean string names by default, or full objects when format=full)
+     * GET /api/action-types
+     */
+    @GetMapping("/action-types")
+    public ResponseEntity<List<?>> getActionTypes(
+            @RequestParam(defaultValue = "true") boolean activeOnly,
+            @RequestParam(defaultValue = "names") String format) {
+        if ("objects".equalsIgnoreCase(format) || "full".equalsIgnoreCase(format) || "entities".equalsIgnoreCase(format)) {
+            return ResponseEntity.ok(masters.getAllActionTypes(activeOnly));
+        }
+        return ResponseEntity.ok(masters.getActionTypeNames(activeOnly));
+    }
+
     private static boolean isNumeric(String s) {
         if (s == null || s.isBlank()) return false;
         String t = s.trim();

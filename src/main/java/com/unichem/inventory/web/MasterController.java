@@ -2,11 +2,14 @@ package com.unichem.inventory.web;
 
 import com.unichem.inventory.domain.*;
 import com.unichem.inventory.dto.Dtos;
+import com.unichem.inventory.dto.Dtos.ActionTypeDto;
 import com.unichem.inventory.dto.Dtos.BusinessUnitDto;
+import com.unichem.inventory.dto.Dtos.ResponsibleFunctionDto;
 import com.unichem.inventory.dto.Dtos.SidebarResponseDto;
 import com.unichem.inventory.repo.SyncLogRepository;
 import com.unichem.inventory.service.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -67,15 +70,60 @@ public class MasterController {
     @PutMapping("/material-groups/{code}") @PreAuthorize("hasAuthority('masters.edit')") public MaterialGroupMap updateMg(@PathVariable String code, @RequestBody MaterialGroupMap m) { return masters.updateMgroup(code, m); }
     @DeleteMapping("/material-groups/{code}") @PreAuthorize("hasAuthority('masters.edit')") public void delMg(@PathVariable String code) { masters.deleteMgroup(code); }
 
-    @GetMapping("/functions") public List<ResponsibleFunction> getAllFunctions(@RequestParam(defaultValue = "false") boolean activeOnly) { return masters.getAllFunctions(activeOnly); }
+    @GetMapping("/functions")
+    public List<?> getAllFunctions(
+            @RequestParam(defaultValue = "true") boolean activeOnly,
+            @RequestParam(defaultValue = "names") String format) {
+        if ("objects".equalsIgnoreCase(format) || "full".equalsIgnoreCase(format) || "entities".equalsIgnoreCase(format)) {
+            return masters.getAllFunctions(activeOnly);
+        }
+        return masters.getFunctionNames(activeOnly);
+    }
+
+    @GetMapping("/functions/items")
+    public List<ResponsibleFunction> getAllFunctionItems(@RequestParam(defaultValue = "false") boolean activeOnly) {
+        return masters.getAllFunctions(activeOnly);
+    }
+
     @PostMapping("/functions") @PreAuthorize("hasAuthority('masters.edit')") public ResponsibleFunction saveFunction(@RequestBody ResponsibleFunction f) { return masters.saveFunction(f); }
     @PostMapping("/functions/batch") @PreAuthorize("hasAuthority('masters.edit')") public List<ResponsibleFunction> saveAllFunctions(@RequestBody List<ResponsibleFunction> list) { return masters.saveAllFunctions(list); }
 
-    @GetMapping("/action-types") public List<ActionType> getAllActionTypes(@RequestParam(defaultValue = "false") boolean activeOnly) { return masters.getAllActionTypes(activeOnly); }
+    @GetMapping("/action-types")
+    public List<?> getAllActionTypes(
+            @RequestParam(defaultValue = "true") boolean activeOnly,
+            @RequestParam(defaultValue = "names") String format) {
+        if ("objects".equalsIgnoreCase(format) || "full".equalsIgnoreCase(format) || "entities".equalsIgnoreCase(format)) {
+            return masters.getAllActionTypes(activeOnly);
+        }
+        return masters.getActionTypeNames(activeOnly);
+    }
+
+    @GetMapping("/action-types/items")
+    public List<ActionType> getAllActionTypeItems(@RequestParam(defaultValue = "false") boolean activeOnly) {
+        return masters.getAllActionTypes(activeOnly);
+    }
+
     @PostMapping("/action-types") @PreAuthorize("hasAuthority('masters.edit')") public ActionType saveActionType(@RequestBody ActionType a) { return masters.saveActionType(a); }
     @PostMapping("/action-types/batch") @PreAuthorize("hasAuthority('masters.edit')") public List<ActionType> saveAllActionTypes(@RequestBody List<ActionType> list) { return masters.saveAllActionTypes(list); }
 
-    @PutMapping("/lists/{kind}") @PreAuthorize("hasAuthority('masters.edit')") public void list(@PathVariable String kind, @RequestBody List<?> v) { masters.setListGeneric(kind, v); }
+    @PutMapping({"/lists/actionTypes", "/lists/acttypes"})
+    @PreAuthorize("hasAuthority('masters.edit')")
+    public ResponseEntity<List<ActionType>> updateActionTypes(@RequestBody List<ActionTypeDto> actionTypes) {
+        return ResponseEntity.ok(masters.updateActionTypes(actionTypes));
+    }
+
+    @PutMapping("/lists/functions")
+    @PreAuthorize("hasAuthority('masters.edit')")
+    public ResponseEntity<List<ResponsibleFunction>> updateFunctions(@RequestBody List<ResponsibleFunctionDto> functions) {
+        return ResponseEntity.ok(masters.updateFunctions(functions));
+    }
+
+    @PutMapping("/lists/{kind}")
+    @PreAuthorize("hasAuthority('masters.edit')")
+    public ResponseEntity<?> list(@PathVariable String kind, @RequestBody List<ActionTypeDto> items) {
+        masters.setListGeneric(kind, items);
+        return ResponseEntity.ok(Map.of("success", true));
+    }
 
     @PostMapping("/persons") @PreAuthorize("hasAuthority('masters.edit')") public ResponsiblePerson person(@RequestBody ResponsiblePerson p) { return masters.savePerson(p); }
     @DeleteMapping("/persons/{id}") @PreAuthorize("hasAuthority('masters.edit')") public void delPerson(@PathVariable Long id) { masters.deletePerson(id); }

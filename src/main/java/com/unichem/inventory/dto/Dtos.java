@@ -189,17 +189,83 @@ public final class Dtos {
             boolean active,
             int sortOrder) {}
 
-    public record ResponsibleFunctionDto(
-            String name,
-            String v,
-            boolean active,
-            int sortOrder) {}
+    public static class ResponsibleFunctionDto {
+        private String v;
+        private String name;
+        @com.fasterxml.jackson.annotation.JsonAlias({"is_active", "isActive"})
+        private Boolean active = true;
+        private Integer sortOrder = 0;
 
-    public record ActionTypeDto(
-            String name,
-            String v,
-            boolean active,
-            int sortOrder) {}
+        public ResponsibleFunctionDto() {}
+
+        public ResponsibleFunctionDto(String value) {
+            this.v = value;
+            this.name = value;
+            this.active = true;
+            this.sortOrder = 0;
+        }
+
+        public ResponsibleFunctionDto(String name, String v, Boolean active, Integer sortOrder) {
+            this.name = name != null ? name : v;
+            this.v = v != null ? v : name;
+            this.active = active != null ? active : Boolean.TRUE;
+            this.sortOrder = sortOrder != null ? sortOrder : 0;
+        }
+
+        public String getV() { return v != null && !v.isBlank() ? v : name; }
+        public void setV(String v) { this.v = v; if (this.name == null || this.name.isBlank()) this.name = v; }
+        public String getName() { return name != null && !name.isBlank() ? name : v; }
+        public void setName(String name) { this.name = name; if (this.v == null || this.v.isBlank()) this.v = name; }
+        public Boolean getActive() { return active != null ? active : Boolean.TRUE; }
+        public boolean isActive() { return !Boolean.FALSE.equals(active); }
+        public void setActive(Boolean active) { this.active = active != null ? active : Boolean.TRUE; }
+        public Integer getSortOrder() { return sortOrder != null ? sortOrder : 0; }
+        public void setSortOrder(Integer sortOrder) { this.sortOrder = sortOrder != null ? sortOrder : 0; }
+
+        public String name() { return getName(); }
+        public String v() { return getV(); }
+        public boolean active() { return isActive(); }
+        public int sortOrder() { return getSortOrder(); }
+    }
+
+    public static class ActionTypeDto {
+        private String v;
+        private String name;
+        @com.fasterxml.jackson.annotation.JsonAlias({"is_active", "isActive"})
+        private Boolean active = true;
+        private Integer sortOrder = 0;
+
+        public ActionTypeDto() {}
+
+        public ActionTypeDto(String value) {
+            this.v = value;
+            this.name = value;
+            this.active = true;
+            this.sortOrder = 0;
+        }
+
+        public ActionTypeDto(String name, String v, Boolean active, Integer sortOrder) {
+            this.name = name != null ? name : v;
+            this.v = v != null ? v : name;
+            this.active = active != null ? active : Boolean.TRUE;
+            this.sortOrder = sortOrder != null ? sortOrder : 0;
+        }
+
+        public String getV() { return v != null && !v.isBlank() ? v : name; }
+        public void setV(String v) { this.v = v; if (this.name == null || this.name.isBlank()) this.name = v; }
+        public String getName() { return name != null && !name.isBlank() ? name : v; }
+        public void setName(String name) { this.name = name; if (this.v == null || this.v.isBlank()) this.v = name; }
+        public Boolean getActive() { return active != null ? active : Boolean.TRUE; }
+        public boolean isActive() { return !Boolean.FALSE.equals(active); }
+        public void setActive(Boolean active) { this.active = active != null ? active : Boolean.TRUE; }
+        public Integer getSortOrder() { return sortOrder != null ? sortOrder : 0; }
+        public void setSortOrder(Integer sortOrder) { this.sortOrder = sortOrder != null ? sortOrder : 0; }
+
+        public String name() { return getName(); }
+        public String v() { return getV(); }
+        public boolean active() { return isActive(); }
+        public int sortOrder() { return getSortOrder(); }
+    }
 
     public record ResponsiblePersonDto(
             Long id,
@@ -320,16 +386,23 @@ public final class Dtos {
     public record ReportMetricsDto(
             int n,
             int batches,
+            int batchCount,
             int mats,
             int materials,
             double v,
             double totalValue,
             double u,
             double unrestrictedValue,
+            int uN,
+            int unrestrictedBatchCount,
             double q,
             double qualityValue,
+            int qN,
+            int qualityBatchCount,
             double b,
             double blockedValue,
+            int bN,
+            int blockedBatchCount,
             double aged,
             double agedValue,
             int agedN,

@@ -11,4 +11,6 @@ public interface ResponsibleFunctionRepository extends JpaRepository<Responsible
     List<ResponsibleFunction> findByActiveTrueOrderBySortOrderAscNameAsc();
     @Query("SELECT f FROM ResponsibleFunction f WHERE f.active = true ORDER BY f.sortOrder ASC, f.name ASC")
     List<ResponsibleFunction> findByActiveTrueOrderByOrderAsc();
+    @Query("SELECT rf.name FROM ResponsibleFunction rf WHERE rf.active = true ORDER BY rf.sortOrder ASC, rf.name ASC")
+    List<String> findAllActiveFunctionNames();
 }

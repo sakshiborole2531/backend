@@ -587,5 +587,105 @@ class MasterSidebarTest {
         ));
         assertThat(masterService.getAllActionTypes(false)).hasSize(2);
         assertThat(masterService.getAllActionTypes(true)).extracting(ActionType::getName).containsExactly("Consumption planning");
+        assertThat(masterService.getActiveFunctionNames()).containsExactly("Production");
+        assertThat(masterService.getActiveActionTypeNames()).containsExactly("Consumption planning");
+    }
+
+    @Test
+    @DisplayName("15. Verify GET /api/masters/functions and GET /api/masters return clean string names for dropdowns")
+    void verifyResponsibleFunctionsEndpointReturnsCleanStringNames() throws Exception {
+        List<ResponsibleFunction> seeded = List.of(
+                new ResponsibleFunction("Stores", true, 1),
+                new ResponsibleFunction("Production", true, 2),
+                new ResponsibleFunction("QC", true, 3),
+                new ResponsibleFunction("ObsoleteDept", false, 4)
+        );
+        lenient().when(functions.findAll()).thenReturn(seeded);
+        lenient().when(functions.findAllByOrderBySortOrderAscNameAsc()).thenReturn(seeded);
+        lenient().when(functions.findByActiveTrueOrderBySortOrderAscNameAsc()).thenReturn(
+                seeded.stream().filter(ResponsibleFunction::isActive).toList());
+        lenient().when(functions.findAllActiveFunctionNames()).thenReturn(
+                seeded.stream().filter(ResponsibleFunction::isActive).map(ResponsibleFunction::getName).toList());
+
+        // GET /api/masters/functions returns clean string array ["Stores", "Production", "QC"]
+        mockMvc.perform(get("/api/masters/functions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(3))
+                .andExpect(jsonPath("$[0]").value("Stores"))
+                .andExpect(jsonPath("$[1]").value("Production"))
+                .andExpect(jsonPath("$[2]").value("QC"));
+
+        // GET /api/masters/functions?format=full&activeOnly=false returns full DTO/entity objects
+        mockMvc.perform(get("/api/masters/functions").param("format", "full").param("activeOnly", "false"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(4))
+                .andExpect(jsonPath("$[0].name").value("Stores"))
+                .andExpect(jsonPath("$[0].active").value(true))
+                .andExpect(jsonPath("$[3].name").value("ObsoleteDept"))
+                .andExpect(jsonPath("$[3].active").value(false));
+
+        // GET /api/masters returns clean string names in $.functions and full objects in $.functionItems
+        mockMvc.perform(get("/api/masters"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.functions.length()").value(3))
+                .andExpect(jsonPath("$.functions[0]").value("Stores"))
+                .andExpect(jsonPath("$.functions[1]").value("Production"))
+                .andExpect(jsonPath("$.functions[2]").value("QC"))
+                .andExpect(jsonPath("$.functionItems.length()").value(4));
+    }
+
+    @Test
+    @DisplayName("16. Verify PUT /api/masters/lists/actionTypes and /api/masters/lists/functions accept typed DTO lists with HTTP 200")
+    void verifyPutMasterListsActionTypesAndFunctionsEndpoints() throws Exception {
+        Map<String, ActionType> actStore = new LinkedHashMap<>();
+        Map<String, ResponsibleFunction> fnStore = new LinkedHashMap<>();
+
+        lenient().when(actionTypes.findAll()).thenAnswer(inv -> new ArrayList<>(actStore.values()));
+        lenient().when(actionTypes.save(any(ActionType.class))).thenAnswer(inv -> {
+            ActionType a = inv.getArgument(0);
+            actStore.put(a.getName(), a);
+            return a;
+        });
+
+        lenient().when(functions.findAll()).thenAnswer(inv -> new ArrayList<>(fnStore.values()));
+        lenient().when(functions.save(any(ResponsibleFunction.class))).thenAnswer(inv -> {
+            ResponsibleFunction f = inv.getArgument(0);
+            fnStore.put(f.getName(), f);
+            return f;
+        });
+
+        String actionTypesJson = """
+                [
+                  { "v": "Consumption planning", "name": "Consumption planning", "active": true },
+                  { "v": "Archived action", "name": "Archived action", "active": false }
+                ]
+                """;
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/masters/lists/actionTypes")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(actionTypesJson))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].name").value("Consumption planning"))
+                .andExpect(jsonPath("$[0].active").value(true))
+                .andExpect(jsonPath("$[1].name").value("Archived action"))
+                .andExpect(jsonPath("$[1].active").value(false));
+
+        String functionsJson = """
+                [
+                  { "v": "Stores", "name": "Stores", "active": true },
+                  { "v": "InactiveFn", "name": "InactiveFn", "active": false }
+                ]
+                """;
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/masters/lists/functions")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(functionsJson))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].name").value("Stores"))
+                .andExpect(jsonPath("$[0].active").value(true))
+                .andExpect(jsonPath("$[1].name").value("InactiveFn"))
+                .andExpect(jsonPath("$[1].active").value(false));
     }
 }

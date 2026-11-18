@@ -72,8 +72,10 @@ public class MasterService {
                 ? numSeries.findByActiveTrueOrderBySortOrderAscSeriesPatternAsc()
                 : numSeries.findAllByOrderBySortOrderAscSeriesPatternAsc()));
         m.put("materialGroups", getAllMaterialGroups(activeOnly));
-        m.put("functions", getAllFunctions(activeOnly));
-        m.put("actionTypes", getAllActionTypes(activeOnly));
+        m.put("functions", getActiveFunctionNames());
+        m.put("functionItems", getAllFunctions(activeOnly));
+        m.put("actionTypes", getActiveActionTypeNames());
+        m.put("actionTypeItems", getAllActionTypes(activeOnly));
         m.put("persons", getAllPersons(activeOnly));
         m.put("categories", MAT_TYPES);
         m.put("departments", DEPTS);
@@ -727,11 +729,64 @@ public class MasterService {
         return getAllActionTypes(false);
     }
 
+    public List<String> getActiveFunctionNames() {
+        List<String> names = functions.findAllActiveFunctionNames();
+        if (names != null && !names.isEmpty()) {
+            return names;
+        }
+        return getAllFunctions(true).stream()
+                .map(ResponsibleFunction::getName)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    public List<String> getFunctionNames(boolean activeOnly) {
+        if (activeOnly) {
+            return getActiveFunctionNames();
+        }
+        return getAllFunctions(false).stream()
+                .map(ResponsibleFunction::getName)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    public List<String> getActiveActionTypeNames() {
+        List<String> names = actionTypes.findAllActiveActionTypeNames();
+        if (names != null && !names.isEmpty()) {
+            return names;
+        }
+        return getAllActionTypes(true).stream()
+                .map(ActionType::getName)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    public List<String> getActionTypeNames(boolean activeOnly) {
+        if (activeOnly) {
+            return getActiveActionTypeNames();
+        }
+        return getAllActionTypes(false).stream()
+                .map(ActionType::getName)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    @Transactional public List<ActionType> updateActionTypes(List<ActionTypeDto> actionTypesList) {
+        setListGeneric("actionTypes", actionTypesList);
+        return getAllActionTypes(false);
+    }
+
+    @Transactional public List<ResponsibleFunction> updateFunctions(List<ResponsibleFunctionDto> functionsList) {
+        setListGeneric("functions", functionsList);
+        return getAllFunctions(false);
+    }
+
     @Transactional public void setList(String kind, List<String> values) {
         setListGeneric(kind, values);
     }
 
     @Transactional public void setListGeneric(String kind, List<?> items) {
+        if (items == null) return;
         if ("functions".equalsIgnoreCase(kind)) {
             Map<String, Boolean> activeMap = new LinkedHashMap<>();
             List<String> names = new ArrayList<>();
@@ -740,6 +795,18 @@ public class MasterService {
                     String name = rf.getName() != null ? rf.getName().trim() : "";
                     if (!name.isEmpty()) {
                         activeMap.put(name, rf.isActive());
+                        if (!names.contains(name)) names.add(name);
+                    }
+                } else if (obj instanceof ResponsibleFunctionDto dto) {
+                    String name = dto.getName() != null ? dto.getName().trim() : "";
+                    if (!name.isEmpty()) {
+                        activeMap.put(name, dto.isActive());
+                        if (!names.contains(name)) names.add(name);
+                    }
+                } else if (obj instanceof ActionTypeDto dto) {
+                    String name = dto.getName() != null ? dto.getName().trim() : "";
+                    if (!name.isEmpty()) {
+                        activeMap.put(name, dto.isActive());
                         if (!names.contains(name)) names.add(name);
                     }
                 } else if (obj instanceof Map<?, ?> m) {
@@ -774,6 +841,18 @@ public class MasterService {
                     String name = at.getName() != null ? at.getName().trim() : "";
                     if (!name.isEmpty()) {
                         activeMap.put(name, at.isActive());
+                        if (!names.contains(name)) names.add(name);
+                    }
+                } else if (obj instanceof ActionTypeDto dto) {
+                    String name = dto.getName() != null ? dto.getName().trim() : "";
+                    if (!name.isEmpty()) {
+                        activeMap.put(name, dto.isActive());
+                        if (!names.contains(name)) names.add(name);
+                    }
+                } else if (obj instanceof ResponsibleFunctionDto dto) {
+                    String name = dto.getName() != null ? dto.getName().trim() : "";
+                    if (!name.isEmpty()) {
+                        activeMap.put(name, dto.isActive());
                         if (!names.contains(name)) names.add(name);
                     }
                 } else if (obj instanceof Map<?, ?> m) {

@@ -734,5 +734,24 @@ class AutomaticImportTest {
                 .andReturn().getResponse().getContentAsByteArray();
 
         assertThat(new String(pdfBytes, 0, 8)).startsWith("%PDF-1.4");
+
+        // d) GET /api/reports/dashboard returns batch counts alongside financial values for Unrestricted, Quality, Blocked
+        repMvc.perform(get("/api/reports/dashboard"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.batchCount").value(3))
+                .andExpect(jsonPath("$.unrestrictedBatchCount").value(3))
+                .andExpect(jsonPath("$.qualityBatchCount").value(0))
+                .andExpect(jsonPath("$.blockedBatchCount").value(0))
+                .andExpect(jsonPath("$.totals.batchCount").value(3))
+                .andExpect(jsonPath("$.totals.unrestrictedBatchCount").value(3))
+                .andExpect(jsonPath("$.totals.qualityBatchCount").value(0))
+                .andExpect(jsonPath("$.totals.blockedBatchCount").value(0))
+                .andExpect(jsonPath("$.totals.uN").value(3))
+                .andExpect(jsonPath("$.totals.qN").value(0))
+                .andExpect(jsonPath("$.totals.bN").value(0))
+                .andExpect(jsonPath("$.byCategory[0].batchCount").value(2))
+                .andExpect(jsonPath("$.byCategory[0].unrestrictedBatchCount").value(2))
+                .andExpect(jsonPath("$.byStatus[0].status").value("Unrestricted"))
+                .andExpect(jsonPath("$.byStatus[0].batchCount").value(3));
     }
 }

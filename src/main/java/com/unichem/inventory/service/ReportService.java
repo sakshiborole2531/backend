@@ -287,6 +287,9 @@ public class ReportService {
         double u = sum(list, CalcItem::uVal);
         double q = sum(list, CalcItem::qVal);
         double b = sum(list, CalcItem::bVal);
+        int uN = (int) list.stream().filter(x -> x.unrestrictedQty() > 0).count();
+        int qN = (int) list.stream().filter(x -> x.qualityQty() > 0).count();
+        int bN = (int) list.stream().filter(x -> x.blockedQty() > 0).count();
 
         List<CalcItem> agedList = list.stream().filter(x -> x.age() != null && x.age() > t.agingDays()).toList();
         List<CalcItem> expList = list.stream().filter(x -> x.rsl() != null && x.rsl() >= 0 && x.rsl() <= t.expiryDays()).toList();
@@ -311,12 +314,12 @@ public class ReportService {
         int totAct = ac != null ? ac.total() : 0;
 
         return new ReportMetricsDto(
-                n, n,
+                n, n, n,
                 mats, mats,
                 v, v,
-                u, u,
-                q, q,
-                b, b,
+                u, u, uN, uN,
+                q, q, qN, qN,
+                b, b, bN, bN,
                 agedVal, agedVal, agedList.size(), agedList.size(),
                 expVal, expVal, expList.size(), expList.size(),
                 expdVal, expdVal, expdList.size(), expdList.size(),
@@ -344,13 +347,23 @@ public class ReportService {
     private List<Map<String, Object>> buildCategoryBreakdown(List<CalcItem> items) {
         return MAT_TYPES.stream().map(c -> {
             List<CalcItem> r = items.stream().filter(x -> c.equals(x.matType())).toList();
+            long uCount = r.stream().filter(x -> x.unrestrictedQty() > 0).count();
+            long qCount = r.stream().filter(x -> x.qualityQty() > 0).count();
+            long bCount = r.stream().filter(x -> x.blockedQty() > 0).count();
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("category", c);
             m.put("short", SHORT.getOrDefault(c, c));
             m.put("n", r.size());
+            m.put("batchCount", r.size());
             m.put("u", sum(r, CalcItem::uVal));
+            m.put("uN", uCount);
+            m.put("unrestrictedBatchCount", uCount);
             m.put("q", sum(r, CalcItem::qVal));
+            m.put("qN", qCount);
+            m.put("qualityBatchCount", qCount);
             m.put("b", sum(r, CalcItem::bVal));
+            m.put("bN", bCount);
+            m.put("blockedBatchCount", bCount);
             m.put("v", sum(r, CalcItem::value));
             return m;
         }).toList();
